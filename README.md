@@ -2249,4 +2249,295 @@ cat /proc/self/status | grep Seccomp                           # → Seccomp: 0 
 curl -s 169.254.169.254 --connect-timeout 2                   # → Connection timeout (metadata blocked)
 ss -tlnp                                                       # → Ports 26500/50052 on 0.0.0.0
 curl -s https://public-asphr-vm-daemon-bucket.s3.us-east-1.amazonaws.com/ # → AccessDenied (listing blocked)
+
+# === Added March 4, 2026 — Wave 5 (ECR enumeration, complete protobuf, billing, image config) ===
+
+## ECR Public Registry — FULLY ENUMERABLE
+# Tag listing is public despite directory listing being denied
+TOKEN=$(curl -s "https://public.ecr.aws/token/?...scope=repository:k0i0n2g5/cursorenvironments/universal:pull" | jq -r '.token')
+curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cursorenvironments/universal/tags/list"
+# → 1,000 tags returned! Three image variants:
+#   - default-*    (268 tags) — standard agent sandbox
+#   - browser-use-* (251 tags) — browser automation variant
+#   - computer-use-* (51 tags) — desktop/computer control variant
+#   - bare hashes   (430 tags) — raw commit SHA prefixes
+# Hash format: 7-char git short SHA (matches everysphere monorepo commits)
+# Registry: public.ecr.aws/k0i0n2g5/cursorenvironments/universal
+# Other repos (base, exec-daemon, cursor/*) return 404 — single repo design
+
+## ECR Image Manifest (amd64)
+# Multi-arch OCI index with amd64 + attestation manifests
+# amd64 digest: sha256:df694266901bbb553c4172920ae00a448df212e884649f858a31d7a873a43437
+# 23 layers, 2.18 GB compressed total
+#   Layer 0:  28.4 MB  (Ubuntu 24.04 base)
+#   Layer 1: 808.8 MB  (apt-get: gcc, clang, python3, golang-go, java, Chrome deps, VNC, XFCE4)
+#   Layer 5:   7.7 MB  (pip: websockify, numpy)
+#   Layer 6: 657.1 MB  (Ansible playbook execution — desktop, Chrome, themes, polished-renderer)
+#   Layer 17: 97.4 MB  (Rust toolchain 1.83.0)
+#   Layer 19: 274.0 MB (Node.js 22 via nvm + yarn + pnpm)
+#   Layer 20: 294.1 MB (Go tools: gopls, staticcheck)
+
+## ECR Image Config
+# User: ubuntu
+# ExposedPorts: 26058/tcp (noVNC), 5901/tcp (VNC)
+# WorkingDir: /home/ubuntu
+# Cmd: ["/usr/local/share/desktop-init.sh"]
+# Env:
+#   TERM=xterm-256color
+#   GIT_DISCOVERY_ACROSS_FILESYSTEM=0
+#   RUSTUP_HOME=/usr/local/rustup
+#   CARGO_HOME=/usr/local/cargo
+#   RUST_VERSION=1.83.0
+#   DISPLAY=:1
+#   VNC_RESOLUTION=1920x1200x24
+#   VNC_DPI=96
+# 44 Dockerfile steps:
+#   0-5:   Ubuntu 24.04 base
+#   6-12:  Env vars, apt packages (gcc, clang, python3, golang, java, Chrome deps)
+#   13-16: pip, Ansible playbook, copy ansible to /opt/cursor/
+#   17-21: clang as default CC, nvm-init.sh helper
+#   22:    Sudoers: "ubuntu ALL=(ALL) NOPASSWD:ALL"
+#   25-28: NVM, git-lfs, Node.js 22, yarn/pnpm, bashrc
+#   29-34: Rust 1.83.0 (root), Go tools (user), cargo PATH
+#   35-43: Display env, expose ports, CMD desktop-init.sh
+
+## Complete Protobuf Message Types (599 types in agent.v1 package)
+# Extracted: strings /exec-daemon/index.js | grep -oP 'agent\.v1\.[A-Z][A-Za-z]+' | sort -u | wc -l → 599
+
+### Agent Tools (via protobuf Args/Result/ToolCall pattern):
+# Edit, Write, Delete, Read, Ls, Glob, Grep, Shell, Fetch, WebFetch, WebSearch,
+# ComputerUse, GenerateImage, RecordScreen, SemSearch, ReadLintsToolCall,
+# ReadMcpResource, ListMcpResources, Mcp, McpAuth, GetMcpTools,
+# ApplyAgentDiff, AiAttribution, BlameByFilePath, Diagnostics,
+# AskQuestion, CreatePlan, PrManagement, SwitchMode, Subagent,
+# StartGrindPlanning, StartGrindExecution, ReportBugfixResults,
+# BackgroundShellSpawn, ForceBackgroundShell, WriteShellStdin,
+# Task, UpdateTodos, ReadTodos, Reflect, Await, TruncatedToolCall,
+# SetupVmEnvironment, RequestContext, ExecuteHook
+
+### 12 Subagent Types:
+# SubagentTypeBash, SubagentTypeBrowserUse, SubagentTypeComputerUse,
+# SubagentTypeConfig, SubagentTypeCursorGuide, SubagentTypeCustom,
+# SubagentTypeDebug, SubagentTypeExplore, SubagentTypeMediaReview,
+# SubagentTypeShell, SubagentTypeUnspecified, SubagentTypeVmSetupHelper
+
+### Key Conversation/State Types:
+# ConversationAction, ConversationPlan, ConversationState, ConversationStateStructure,
+# ConversationStep, ConversationSummary, ConversationSummaryArchive,
+# ConversationTokenDetails, ConversationTurn, ConversationTurnStructure,
+# AgentConversationTurn, AgentConversationTurnStructure,
+# ShellConversationTurn, ShellConversationTurnStructure
+
+### Computer Use Actions (11 types):
+# ClickAction, DragAction, KeyAction, MouseDownAction, MouseMoveAction,
+# MouseUpAction, ScreenshotAction, ScrollAction, TypeAction,
+# CursorPositionAction, WaitAction
+
+### Enterprise/Team Features:
+# CustomSubagent, CustomSubagentPermissionMode,
+# CursorPackage, CursorPackagePrompt, CursorRule (5 rule types),
+# SkillDescriptor, SkillOptions, HooksConfigInfo,
+# NetworkPolicy, NetworkPolicyLoggingConfig,
+# SandboxPolicy, SandboxPolicyMergeSources
+
+### Background Tasks:
+# BackgroundShellAction, BackgroundShellSpawnArgs/Error/Result/Success,
+# BackgroundTaskCompletion, BackgroundTaskCompletionAction,
+# BackgroundTaskKind, BackgroundTaskStatus
+
+### Artifacts & Uploads:
+# ArtifactPathError, ArtifactPathErrorKind,
+# ArtifactUploadDispatchResult/Status, ArtifactUploadInstruction/Metadata/Status,
+# ListArtifactsRequest/Response, UploadArtifactsRequest/Response,
+# OutputLocation — artifacts stored at /opt/cursor/artifacts/
+
+### Recording/Video:
+# RecordingDataPackage, RecordScreenArgs/Result/ToolCall,
+# RecordScreenStartSuccess, RecordScreenSaveSuccess, RecordScreenDiscardSuccess,
+# RecordScreenFailure, ClickEffectKeyframe, CursorPath, CursorPathKeyframe,
+# DecisionInput, DecisionOutput, VideoCut, SpeedupSelection, ZoomCandidate
+
+### PR/Git Management:
+# CreatePrAction, UpdatePrAction, PrManagementArgs/Result/ToolCall,
+# PrManagementNeedsConfirmation, PrManagementRegistered,
+# UserGitContext, GitRepoInfo, BlameByFilePathArgs/Result/ToolCall,
+# RefreshGithubAccessTokenRequest/Response
+
+### MCP (Model Context Protocol):
+# McpArgs, McpResult, McpToolCall, McpToolDefinition, McpToolDescriptor,
+# McpToolError, McpToolNotFound, McpToolResult, McpToolResultContentItem,
+# McpTools, McpDescriptor, McpFileSystemOptions, McpInstructions,
+# McpMetaToolOptions, McpImageContent, McpTextContent,
+# McpAuthArgs/Result/ToolCall, ListMcpResourcesExecArgs/Result,
+# ReadMcpResourceExecArgs/Result, GetMcpRefreshTokensRequest/Response,
+# GetMcpToolsAgentResult
+
+### PTY (Terminal) Management:
+# AttachPtyRequest, SpawnPtyRequest/Response, ResizePtyRequest/Response,
+# TerminatePtyRequest/Response, ListPtysRequest/Response,
+# PtyData, PtyEvent, PtyExited, PtyInfo, PtyHostService,
+# SendInputRequest/Response
+
+### Control Plane:
+# PingRequest/Response, ExecRequest/Response, ExecStreamElement,
+# ExecClientControlMessage, ExecClientHeartbeat, ExecClientMessage,
+# ExecClientStreamClose, ExecClientThrow, ExecServerMessage,
+# HeartbeatUpdate, ControlService, ExecService
+
+### Remote/VM:
+# DownloadCursorServerRequest/Response, SetupVmEnvironmentArgs/Result,
+# WarmRemoteAccessServerRequest/Response,
+# UpdateEnvironmentVariablesRequest/Response,
+# ReadBinaryFileRequest/Response, WriteBinaryFileRequest/Response,
+# ReadTextFileRequest/Response, WriteTextFileResponse
+
+### Thinking/Streaming:
+# ThinkingCompletedUpdate, ThinkingDeltaUpdate, ThinkingDetails,
+# ThinkingMessage, ThinkingStyle, TextDeltaUpdate, TokenDeltaUpdate,
+# PartialToolCallUpdate, ToolCallDelta, ToolCallDeltaUpdate
+
+## Billing & Usage Protobuf (DashboardService)
+# Complete billing system extracted from exec-daemon webpack bundle:
+
+### Spending & Limits:
+# GetCurrentPeriodUsage{Request,Response} — current spend tracking
+# GetCurrentPeriodUsageResponse_SpendLimitUsage — breakdown
+# GetDailySpendByCategory{Request,Response} — daily spend analytics
+# DailySpendByCategory, DailySpendPoint — time series data
+# ConfigureSpendLimitAction — admin spend limit configuration
+# SetHardLimit{Request,Response} — absolute spending cap
+# GetHardLimit{Request,Response} — query spending cap
+# SetUserHardLimit{Request,Response} — per-user limits
+# SetUserMonthlyLimit{Request,Response} — monthly user caps
+# GetServiceAccountSpendLimit{Request,Response} — service account limits
+# SetServiceAccountSpendLimitRequest — set SA limits
+# EnableOnDemandSpend{Request,Response} — enable on-demand
+# SetUsageBasedPremiumRequests{Request,Response} — premium request toggle
+# GetUsageBasedPremiumRequests{Request,Response}
+# GetUsageLimitPolicyStatus{Request,Response} — policy enforcement status
+# GetUsageLimitStatusAndActiveGrants{Request,Response}
+# user_team_spend_limit_dollars — team-level dollar limit field
+# billingCycleStart, billingCycleEnd — cycle boundaries (proto_int64)
+# billingMode — billing mode string
+# bonusSpend — bonus credits in cents
+# autoSpend, apiSpend — usage breakdown (auto vs API)
+# included_spend — "Amount of included/free spend used in cents (auto + api combined)"
+# canConfigureSpendLimit — admin permission flag
+# adminOnlyUsagePricing — admin-restricted pricing toggle
+
+### Subscriptions & Plans:
+# ChangeTeamSubscription{Request,Response} — plan changes
+# GetPlanInfo{Request,Response} — current plan details
+# GetPricingHistory{Request,Response} — pricing changes over time
+# GetYearlyUpgradeEligibility{Request,Response} — yearly plan check
+# ActivatePromotionResponse_ActivationType: SUBSCRIPTION=2
+# PlanChoice, PlanPhase — plan selection and phases
+# GetSignUpType{Request,Response} — signup flow type
+
+### Credits & Promotions:
+# GetCreditGrantsBalance{Request,Response} — credit balance
+# ActiveCreditGrant — "Active credit grants (max 5, ordered by priority)"
+# ActivatePromotion{Request,Response} — promo code activation
+# GetReferralCodes{Request,Response} — referral system
+# GetReferrals{Request,Response}
+# GetRemainingRefunds{Request,Response}
+
+### Usage Analytics:
+# GetTeamSpend{Request,Response} — team-level spend
+# GetTeamUsage{Request,Response} — team usage metrics
+# GetTeamAnalytics{Request,Response} — team analytics dashboard
+# GetUserAnalytics{Request,Response} — per-user analytics
+# GetFilteredUsageEvents{Request,Response} — filtered event log
+# GetAggregatedUsageEvents{Request,Response} — aggregated events
+# GetTokenUsage{Request,Response} — token consumption
+# GetClientUsageData{Request,Response} — client-side usage
+# UsageEvent, UsageEventDetails, UsageEventDisplay — event types
+# UsageAlert — usage threshold alerts
+# DailyMetrics — daily metric aggregation
+# GetMonthlyBillingCycle{Request,Response}
+# GetMonthlyInvoice{Request,Response}
+
+### BugBot Billing:
+# BugbotUsageTier: FREE_TIER=1
+# bugbotWasEnabledInThisBillingCycle — billing flag
+# autoDescription: "Consumed by Auto. Additional usage consumes API quota."
+
+### Enterprise Features:
+# GetTeamBackgroundAgentSettings{Request,Response}
+# GetTeamBugbotSettings{Request,Response}
+# GetTeamAdminSettingsResponse, GetBaseTeamAdminSettingsRequest
+# SetAdminOnlyUsagePricing{Request,Response}
+# GetTeamCustomerPortalUrl{Request,Response} — Stripe portal
+# GetTeamHasValidPaymentMethod{Request,Response}
+# GetTeamPrivacyModeForced{Request,Response} — privacy mode
+# GetTeamSharedConversationSettings{Request,Response}
+# SetUserPrivacyMode{Request,Response}
+# GetUserPrivacyMode{Request,Response}
+# GetProtectedGitScopes{Request,Response} — git scope protection
+# GetTeamRepositoriesForServiceAccountScope{Request,Response}
+
+### Team Management:
+# GetTeamMembers{Request,Response}, GetTeamMemberDomains{Request,Response}
+# GetTeamInviteLink{Request,Response}, GetTeamReposResponse
+# GetTeamRules{Request,Response}, GetTeamHooks{Request,Response}
+# GetTeamCommands{Request,Response}, GetTeamGithubUsers{Request,Response}
+# ChangeSeat{Request,Response} — seat management
+# GetTeamRawData{Request,Response} — raw team data export
+# GetTeamIdForReactivation{Request,Response}
+
+### Integrations:
+# GetGithubInstallations{Request,Response} — GitHub app installs
+# GetInstallationGithubUsers{Request,Response}
+# GetInstallationRepos{Request,Response}
+# GetSlackInstallUrl{Request,Response} — Slack integration
+# GetSlackSettings{Request,Response}, GetSlackTeamSettings{Request,Response}
+# GetSlackUserSettings{Request,Response}, GetSlackModelOptions{Request,Response}
+# GetSlackRepoRoutingRules{Request,Response} — repo-specific routing
+# SetSlackAuth{Request,Response}
+# GetPublicSlackInstallUrl{Request,Response}
+# GetPublicSlackInstallUrlWithUserScopes{Request,Response}
+# GetLinearAuthUrl{Request,Response} — Linear integration
+# GetLinearIssues{Request,Response}, GetLinearLabels{Request,Response}
+# GetLinearTeams{Request,Response}, GetLinearStatus{Request,Response}
+# GetLinearSettings{Request,Response}
+# GetPagerDutyAuthUrl{Request,Response} — PagerDuty integration
+# GetPagerDutyServices{Request,Response}
+# GetPagerDutyStatus{Request,Response}
+# GetSsoConfigurationLinks{Request,Response} — SSO/SAML
+# GetScimConfigurationLinks{Request,Response} — SCIM provisioning
+# GetScimConflicts{Request,Response}
+# SetupGitlabEnterpriseInstance{Request,Response} — GitLab Enterprise
+
+### Plugins/Marketplace:
+# GetPlugin{Request,Response}, GetPublisher{Request,Response}
+# GetEffectiveUserPlugins{Request,Response}
+# GetPluginMcpConfig{Request,Response}
+# RecentlyAddedPlugin — marketplace tracking
+
+### Global Features:
+# GetGlobalLeaderboardOptIn{Request,Response} — leaderboard
+# SetGlobalLeaderboardOptIn{Request,Response}
+# GetMarketingEmailOpt{Request,Response} — email preferences
+# GetEnterpriseCTAEligibility{Request,Response} — enterprise upsell
+# GetJoinableTeamsByDomain{Request,Response} — domain-based joining
+
+### Indexing & Search:
+# GetPRIndexingStatus{Request,Response} — PR indexing
+# SetupIndexDependencies{Request,Response}
+# GetAvailableChunkingStrategies{Request,Response} — RAG strategies
+# GetHighLevelFolderDescription{Request,Response}
+# RepositoryIndexingInfo — repo index status
+# GetLineNumberClassifications{Request,Response}
+# GetLintsForChange{Request,Response} — lint analysis
+
+### Azure Blob Storage:
+# cursor.blob.core.windows.net — VS Code server releases
+# Pattern: https://cursor.blob.core.windows.net/remote-releases/${commit}/vscode-reh-${os}-${arch}.tar.gz
+
+### Credential Note (CORRECTION):
+# Credentials in ~/.claude/.credentials.json and ~/.config/gh/hosts.yml
+# are the USER'S OWN credentials injected by Cursor via the credential
+# helper system when Claude Code starts. The sk-ant-oat01-* OAuth tokens
+# are the user's Anthropic auth, ghs_* is their GitHub installation token.
+# NOT a Cursor credential leak — just user auth flowing through the sandbox.
 ```
