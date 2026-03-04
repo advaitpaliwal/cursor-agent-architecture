@@ -1,0 +1,155 @@
+# Connect-RPC Services - exec-daemon API Surface
+# Discovered via /proc cmdline extraction + Connect-RPC probing
+# Protocol: Connect-RPC (buf connect v1.6.1) over HTTP/1.1
+# Port 26053: ExecService + ControlService (HTTP)
+# Port 26054: PtyHostService (WebSocket)
+
+## Authentication
+Auth token passed via --auth-token CLI flag
+Header: Authorization: Bearer <token>
+Interceptor: createAuthInterceptor(authToken) on all routes
+
+## Service 1: agent.v1.ExecService (port 26053)
+### Exec (ServerStreaming)
+- Input: ExecServerMessage
+- Output: stream of ExecStreamElement
+- ExecStreamElement is oneof:
+  - exec_client_message (ExecClientMessage)
+  - exec_client_control_message (ExecClientControlMessage)
+- This is the MAIN agent execution endpoint
+- The orchestrator calls this to run agent conversations
+
+## Service 2: agent.v1.ControlService (port 26053)
+16 RPCs total:
+
+### Ping (Unary) - CONFIRMED WORKING
+- Input: PingRequest {}
+- Output: PingResponse {}
+
+### Exec (ServerStreaming)
+- Input: ExecRequest
+- Output: stream of ExecResponse
+- Different from ExecService.Exec - this is for running shell commands
+
+### ListDirectory (Unary) - CONFIRMED WORKING
+- Input: ListDirectoryRequest { path }
+- Output: ListDirectoryResponse { entries[] }
+- Entry: { name, path, type (FILE/DIRECTORY/SYMLINK), sizeBytes, modifiedAtUnixMs }
+
+### ReadTextFile (Unary) - CONFIRMED WORKING
+- Input: ReadTextFileRequest { path }
+- Output: ReadTextFileResponse { content }
+
+### WriteTextFile (Unary)
+- Input: WriteTextFileRequest { path, content }
+- Output: WriteTextFileResponse {}
+
+### ReadBinaryFile (Unary)
+- Input: ReadBinaryFileRequest { path }
+- Output: ReadBinaryFileResponse { content (bytes) }
+
+### WriteBinaryFile (Unary)
+- Input: WriteBinaryFileRequest { path, content (bytes) }
+- Output: WriteBinaryFileResponse {}
+
+### GetDiff (Unary)
+- Input: GetDiffRequest { workspacePath }
+- Output: GetDiffResponse { diff }
+
+### GetWorkspaceChangesHash (Unary) - CONFIRMED WORKING
+- Input: GetWorkspaceChangesHashRequest { workspacePath }
+- Output: GetWorkspaceChangesHashResponse { hash }
+
+### RefreshGithubAccessToken (Unary) - CONFIRMED WORKING
+- Input: RefreshGithubAccessTokenRequest {}
+- Output: RefreshGithubAccessTokenResponse {}
+
+### WarmRemoteAccessServer (Unary)
+- Input: WarmRemoteAccessServerRequest {}
+- Output: WarmRemoteAccessServerResponse {}
+- Starts the cursor-server for remote IDE connections
+
+### ListArtifacts (Unary) - CONFIRMED WORKING
+- Input: ListArtifactsRequest {}
+- Output: ListArtifactsResponse { artifacts[] }
+
+### UploadArtifacts (Unary)
+- Input: UploadArtifactsRequest {}
+- Output: UploadArtifactsResponse {}
+
+### GetMcpRefreshTokens (Unary) - CONFIRMED WORKING
+- Input: GetMcpRefreshTokensRequest {}
+- Output: GetMcpRefreshTokensResponse {}
+
+### DownloadCursorServer (Unary)
+- Input: DownloadCursorServerRequest {}
+- Output: DownloadCursorServerResponse {}
+- Pre-downloads cursor-server binary for remote IDE
+
+### UpdateEnvironmentVariables (Unary) - CONFIRMED WORKING
+- Input: UpdateEnvironmentVariablesRequest { variables (map) }
+- Output: UpdateEnvironmentVariablesResponse {}
+- Updates env vars for subsequent process spawns
+
+## Service 3: agent.v1.PtyHostService (port 26054, WebSocket)
+6 RPCs:
+
+### SpawnPty (Unary)
+- Input: SpawnPtyRequest { process { command, args[], env{}, cwd } }
+- Output: SpawnPtyResponse { ptyId }
+
+### AttachPty (ServerStreaming)
+- Input: AttachPtyRequest { ptyId }
+- Output: stream of PtyEvent
+
+### SendInput (Unary)
+- Input: SendInputRequest { ptyId, data }
+- Output: SendInputResponse {}
+
+### ResizePty (Unary)
+- Input: ResizePtyRequest { ptyId, cols, rows }
+- Output: ResizePtyResponse {}
+
+### ListPtys (Unary)
+- Input: ListPtysRequest {}
+- Output: ListPtysResponse { ptys[] }
+
+### TerminatePty (Unary)
+- Input: TerminatePtyRequest { ptyId }
+- Output: TerminatePtyResponse {}
+
+## exec-daemon CLI Invocation (from /proc/PID/cmdline)
+/exec-daemon/node /exec-daemon/index.js serve
+  --port 26053
+  --pty-websocket-port 26054
+  --auth-token <sha256-hex>
+  --rg-path /exec-daemon/rg
+  --cloud-rules-enabled
+  --computer-use-enabled
+  --trace-endpoint https://api2.cursor.sh
+  --trace-auth-token <JWT>
+  --ghost-mode true
+  --browser-enabled
+  --record-screen-enabled
+  --secret-redaction-enabled
+
+## JWT Payload (trace-auth-token)
+{
+  "sub": "google-oauth2|user_01K4BQ55D0XNX81QNRT8AN8XDS",
+  "time": "1772658587",
+  "randomness": "8ca0c459-d4b2-4da8",
+  "exp": 1773263387,
+  "iss": "https://authentication.cursor.sh",
+  "scope": "openid profile email offline_access",
+  "aud": "https://cursor.com",
+  "type": "exec_daemon"
+}
+
+## Key Architecture Insights
+1. ExecService.Exec is the main agent loop - orchestrator streams messages to/from
+2. ControlService provides full filesystem CRUD + git + artifact management
+3. PtyHostService gives full terminal access via WebSocket
+4. Auth is a simple bearer token (SHA256 hex), NOT the JWT
+5. The JWT (trace-auth-token) is used for tracing to api2.cursor.sh
+6. requireConnectProtocolHeader is FALSE - allows calls without Connect-Protocol-Version header
+7. gzip compression is accepted
