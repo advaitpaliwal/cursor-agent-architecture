@@ -1,0 +1,661 @@
+================================================================================
+EXEC-DAEMON PROMPT CONSTRUCTION ANALYSIS
+Source: /exec-daemon/index.js (379,539 lines, minified webpack bundle)
+================================================================================
+
+TABLE OF CONTENTS:
+1. Architecture Overview
+2. RequestContext Proto (the data structure sent to the LLM backend)
+3. LocalRequestContextExecutor (main prompt data assembly)
+4. computeEnv() - Environment details for system prompt
+5. Cursor Rules Loading Pipeline
+6. Cloud Rules Service (AGENTS.md + .cursor/CLOUD.md)
+7. Agent Skills / SKILL.md Loading
+8. Tool Definitions (BuiltinTool enum + MCP tools)
+9. Conversation State & Message Hydration
+10. XML Tag Stripping (transcript sanitization)
+11. Subagent System Prompt Mechanism
+12. Key Architectural Insight
+
+================================================================================
+1. ARCHITECTURE OVERVIEW
+================================================================================
+
+The exec-daemon does NOT contain the actual system prompt text/template. It is
+a LOCAL process that:
+  - Collects environment data, cursor rules, MCP tools, git info, skills
+  - Packages everything into a protobuf `RequestContext` message
+  - Sends this via gRPC to the Cursor AI SERVER (aiserver), which assembles
+    the actual system prompt text
+
+The prompt construction is split:
+  CLIENT (exec-daemon)  ->  builds RequestContext proto  ->  SERVER (aiserver)
+  - OS/shell/paths         - rules[]                       - Assembles system prompt
+  - Git repos/branches     - tools[] (MCP)                 - Injects <rules> XML
+  - Cursor rules (.mdc)    - env (OS, paths, etc)          - Injects <user_info>
+  - AGENTS.md / CLOUD.md   - cloudRule                     - Adds tool definitions
+  - Skills (SKILL.md)      - agentSkills[]                 - Creates <system_reminder>
+  - MCP tool definitions   - customSubagents[]
+
+================================================================================
+2. RequestContext PROTO (line 220977)
+================================================================================
+// agent.v1.RequestContext - The main data structure sent to the AI server
+
+class RequestContext extends Message {
+    rules = [];                          // repeated agent.v1.CursorRule
+    env;                                 // agent.v1.RequestContextEnv
+    repositoryInfo = [];                 // repeated agent.v1.RepositoryIndexingInfo
+    tools = [];                          // repeated agent.v1.McpToolDefinition
+    conversationNotesListing;            // optional string
+    sharedNotesListing;                  // optional string
+    gitRepos = [];                       // repeated agent.v1.GitRepoInfo
+    projectLayouts = [];                 // repeated agent.v1.LsDirectoryTreeNode
+    mcpInstructions = [];                // repeated agent.v1.McpInstructions
+    debugModeConfig;                     // optional agent.v1.DebugModeConfig
+    cloudRule;                           // optional string (AGENTS.md + CLOUD.md content)
+    webSearchEnabled;                    // optional bool
+    skillOptions;                        // optional agent.v1.SkillOptions
+    repositoryInfoShouldQueryProd;       // optional bool
+    fileContents = {};                   // map<string, string>
+    userIntentSummary;                   // optional string (past conversation summary)
+    customSubagents = [];                // repeated agent.v1.CustomSubagent
+    mcpFileSystemOptions;                // optional agent.v1.McpFileSystemOptions
+    webFetchEnabled;                     // optional bool
+    hooksAdditionalContext;              // optional string (from sessionStart hooks)
+    commitAttributionMessage;            // optional string (attribution for commits)
+    prAttributionMessage;                // optional string (attribution for PRs)
+    hooksConfig;                         // optional agent.v1.HooksConfigInfo
+    agentSkills = [];                    // repeated agent.v1.AgentSkill
+    precomputedHumanChanges = [];        // repeated agent.v1.PrecomputedHumanChange
+    recentlyAddedPlugin;                 // optional agent.v1.RecentlyAddedPlugin
+    supportsMcpAuth;                     // optional bool
+    gitRepoInfoComplete;                 // optional bool
+    mcpMetaToolOptions;                  // optional agent.v1.McpMetaToolOptions
+    readLintsEnabled;                    // optional bool
+}
+
+================================================================================
+3. LocalRequestContextExecutor (line 347883)
+================================================================================
+// This is the MAIN class that assembles all prompt context data
+
+class LocalRequestContextExecutor {
+    cursorRulesService;        // Loads .cursor/rules/*.mdc, AGENTS.md, CLAUDE.md, .cursorrules
+    cloudRulesService;         // Loads .cursor/CLOUD.md + AGENTS.md for cloud-specific rules
+    subagentsService;          // Loads custom subagent definitions
+    repositoryProvider;        // Provides codebase reference info
+    grepProvider;              // Provides tracked state (git status)
+    lsExecutor;                // Directory listing
+    mcpStateAccessor;          // MCP tool/server state
+    gitExecutor;               // Git operations
+    workspacePaths;            // Array of workspace root paths
+    // ... sandbox, attribution, skills providers
+
+    // Constructor warms caches eagerly and sets up file watchers
+    constructor(cursorRulesService, cloudRulesService, subagentsService,
+                repositoryProvider, grepProvider, lsExecutor, mcpStateAccessor,
+                gitExecutor, workspacePaths, options = {}) { ... }
+
+    // MAIN METHOD: Computes the full RequestContext
+    async computeCachedRequestContext(ctxt, args) {
+        // Collects all data IN PARALLEL:
+        const [globalData, mcp, env, { gitRepos, gitRepoInfoComplete },
+               conversationNotesListing, sharedNotesListing] = await Promise.all([
+            getGlobalData(),                    // rules, cloudRule, codebaseReference, customSubagents
+            this.mcpStateAccessor.getState(),   // MCP servers, tools, instructions
+            computeEnv(),                       // OS, shell, paths, sandbox info
+            this.collectWorkspaceCaches(),       // Git repos per workspace
+            generateConversationNotesTreeListing(),
+            generateSharedNotesTreeListing(),
+        ]);
+
+        // Build the RequestContext proto
+        const requestContext = new RequestContext({
+            rules: globalData.rules,             // All cursor rules (merged, deduped)
+            env,                                 // Environment info
+            gitRepos,
+            gitRepoInfoComplete,
+            repositoryInfo: [...],               // Codebase indexing info
+            tools: mcp.servers                   // MCP tools flattened
+                .flatMap(server => server.tools)
+                .map(tool => new McpToolDefinition({
+                    name: tool.name,
+                    providerIdentifier: tool.providerIdentifier,
+                    toolName: tool.toolName,
+                    description: tool.description,
+                    inputSchema: tool.inputSchema
+                        ? Value.fromJson(tool.inputSchema) : undefined,
+                })),
+            conversationNotesListing,
+            sharedNotesListing,
+            mcpInstructions: mcp.servers.flatMap(server => server.instructions),
+            customSubagents: globalData.customSubagents,
+            mcpFileSystemOptions,
+            mcpMetaToolOptions,                  // When enabled, uses GetMcpTools/CallMcpTool
+            supportsMcpAuth: true,
+            commitAttributionMessage: attributeCommitsToAgent ? "enabled" : undefined,
+            prAttributionMessage: attributePRsToAgent ? "enabled" : undefined,
+            agentSkills: this.getAgentSkills ? await this.getAgentSkills() : [],
+        });
+
+        // Cloud rule injected separately (optional)
+        if (globalData.cloudRule !== null && globalData.cloudRule !== undefined) {
+            requestContext.cloudRule = globalData.cloudRule;
+        }
+        return requestContext;
+    }
+
+    // Global cache: rules + cloudRule + codebaseReference + customSubagents
+    async computeGlobalCache(ctx) {
+        const [rules, cloudRule, codebaseReference, customSubagents] = await Promise.all([
+            this.cursorRulesService.getAllCursorRules(ctx),
+            this.cloudRulesService?.getCloudRule(ctx) ?? null,
+            this.repositoryProvider.getCodebaseReference(ctx, signal).catch(() => undefined),
+            this.subagentsService?.getAllSubagents().catch(() => []) ?? [],
+        ]);
+        return { rules, cloudRule, codebaseReference, customSubagents };
+    }
+}
+
+================================================================================
+4. computeEnv() - ENVIRONMENT DETAILS (line 347633)
+================================================================================
+
+// agent.v1.RequestContextEnv - Environment details for system prompt/context (line 220538)
+class RequestContextEnv extends Message {
+    osVersion = "";                          // e.g. "linux 6.1.147"
+    workspacePaths = [];                     // workspace root paths
+    shell = "";                              // suggested shell (bash/zsh/etc)
+    sandboxEnabled = false;                  // whether sandbox is active
+    terminalsFolder = "";                    // ~/.cursor/projects/{slug}/terminals
+    agentSharedNotesFolder = "";             // ~/.cursor/projects/{slug}/agent-notes/shared
+    agentConversationNotesFolder = "";       // ~/.cursor/projects/{slug}/agent-notes/{sessionId}
+    timeZone = "";                           // e.g. "America/Los_Angeles"
+    projectFolder = "";                      // ~/.cursor/projects/{slug}/
+    agentTranscriptsFolder = "";             // ~/.cursor/projects/{slug}/agent-transcripts
+    artifactsFolder;                         // /opt/cursor/artifacts/ (cloud agents only)
+    sandboxSupported;                        // whether environment supports sandbox
+    sandboxNetworkHasDefaults;               // whether sandbox has default network allowlist
+    sandboxNetworkExplicitAllowlist = [];    // explicit domain patterns allowed
+    secretRedactionEnabled;                  // whether secret redaction is active
+}
+
+async function computeEnv(_ctx, workspacePaths, options = {}) {
+    const osVersion = `${os.platform()} ${os.release()}`;
+    const shell = getSuggestedShell(userTerminalHint);
+    const timeZone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+    const projectFolder = projectDir;
+    const terminalsFolder = projectDir ? `${projectDir}/terminals` : undefined;
+    const agentSharedNotesFolder = projectDir ? `${projectDir}/agent-notes/shared` : undefined;
+    const agentConversationNotesFolder = projectDir && notesSessionId
+        ? `${projectDir}/agent-notes/${notesSessionId}` : undefined;
+    const agentTranscriptsFolder = projectDir ? `${projectDir}/agent-transcripts` : undefined;
+    const sandboxEnabled = getSandboxEnabled ? getSandboxEnabled() : false;
+    const sandboxSupported = getSandboxSupported?.();
+
+    return new RequestContextEnv({
+        osVersion, workspacePaths, shell, sandboxEnabled,
+        projectFolder, terminalsFolder, agentSharedNotesFolder,
+        agentConversationNotesFolder, agentTranscriptsFolder, timeZone,
+        artifactsFolder, secretRedactionEnabled,
+        sandboxSupported, sandboxNetworkHasDefaults, sandboxNetworkExplicitAllowlist,
+    });
+}
+
+================================================================================
+5. CURSOR RULES LOADING PIPELINE (line 361895+)
+================================================================================
+
+// ARCHITECTURE: Three services merged together, then deduped
+
+// 1. MergedCursorRulesService - combines all rule services
+class MergedCursorRulesService {
+    cursorRulesServices;  // Array of rule service implementations
+
+    async getAllCursorRules(ctx) {
+        // Call all services in parallel
+        const allRulesArrays = await Promise.all(
+            this.cursorRulesServices.map(s => s.getAllCursorRules(ctx))
+        );
+        const allRules = allRulesArrays.flat();
+
+        // Dedupe by key - first occurrence wins (Cursor sources processed first)
+        // dedupeKey() uses (config root)::(path under config) for .cursor/.claude
+        // so same skill/rule in both directories collides and Cursor wins
+        const seenKeys = new Set();
+        const dedupedRules = [];
+        for (const rule of allRules) {
+            const key = dedupeKey(rule.fullPath);
+            if (!seenKeys.has(key)) {
+                seenKeys.add(key);
+                dedupedRules.push(rule);
+            }
+        }
+        return dedupedRules;
+    }
+}
+
+// 2. LocalCursorRulesService - loads from workspace hierarchy
+class LocalCursorRulesService {
+    // File patterns watched:
+    //   ".cursor/rules/**/*.mdc", "AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", ".cursorrules"
+
+    async load(ctx) {
+        const cwd = path.resolve(this.rootDirectory);
+        const gitRoot = await findGitRoot(ctx, this.gitExecutor, cwd);
+        const workspaceRoot = gitRoot || cwd;
+
+        // Load from multiple sources in parallel:
+        const allRules = await Promise.all([
+            this.loadCursorRulesRule(ctx, workspaceRoot),      // .cursorrules (legacy)
+            this.loadRulesFromHierarchy(ctx, cwd),             // Walk up directory tree
+            this.loadRulesFromSubdirectories(ctx, cwd),        // Nested .cursor/rules/**/*.mdc
+            this.loadMarkdownFilesFromSubdirectories(ctx, cwd) // Nested AGENTS.md/CLAUDE.md
+        ]);
+
+        // Dedupe by path, filter excluded, convert to CursorRule proto
+        return [...map.values()]
+            .filter(rule => !this.shouldExcludeFromCursorRules(rule))
+            .map(pr => this.toCursorRule(pr));
+    }
+
+    // Walk UP the directory tree loading rules at each level
+    async loadRulesFromHierarchy(ctx, startPath) {
+        let currentPath = startPath;
+        while (true) {
+            // Check for .cursor/rules directory
+            const rulesDir = path.join(currentPath, ".cursor", "rules");
+            if (await this.dirIsDirectory(ctx, rulesDir))
+                rules.push(...(await this.loadRulesFromDirectory(ctx, rulesDir)));
+
+            // Optionally check CLAUDE.md and CLAUDE.local.md (third-party extensibility)
+            if (this.getThirdPartyExtensibilityEnabled()) {
+                rules.push(...(await this.loadRulesFromMarkdownFile(ctx, currentPath, "CLAUDE.md")));
+                rules.push(...(await this.loadRulesFromMarkdownFile(ctx, currentPath, "CLAUDE.local.md")));
+            }
+
+            // Always check AGENTS.md
+            rules.push(...(await this.loadRulesFromMarkdownFile(ctx, currentPath, "AGENTS.md")));
+
+            const parentPath = path.dirname(currentPath);
+            if (parentPath === currentPath) break;
+            currentPath = parentPath;
+        }
+        return rules;
+    }
+
+    // Rule type classification:
+    toCursorRule(rule) {
+        if (rule.frontmatter.alwaysApply === true) {
+            type = { case: "global", value: new CursorRuleTypeGlobal() };
+        } else {
+            const globs = parseGlobs(rule.frontmatter.globs);
+            if (globs && globs.length > 0) {
+                type = { case: "fileGlobbed", value: new CursorRuleTypeFileGlobs({ globs }) };
+            } else if (typeof rule.frontmatter.description === "string") {
+                type = { case: "agentFetched", value: new CursorRuleTypeAgentFetched({ description }) };
+            } else {
+                type = { case: "manuallyAttached", value: new CursorRuleTypeManuallyAttached() };
+            }
+        }
+        return new CursorRule({
+            fullPath: rule.path,
+            content: rule.body,
+            type: new CursorRuleType({ type }),
+            environments,
+            disabledEnvironments,
+        });
+    }
+
+    // .mdc frontmatter parser (line 362462)
+    // Supports: key: value, globs as string or YAML array, nested metadata blocks
+    parseRuleFile(content) {
+        const trimmedContent = content.trimStart();
+        if (!trimmedContent.startsWith("---")) return null;
+        const parts = trimmedContent.split("---").filter(Boolean);
+        // Parse frontmatter line by line (avoids gray-matter YAML issues with globs)
+        // Supports: description, alwaysApply, globs (string/array), metadata blocks
+    }
+
+    // Exclusion logic:
+    shouldExcludeFromCursorRules(rule) {
+        return rule.frontmatter.attachToBugBot === true;
+    }
+}
+
+// CursorRule proto types (line 214646):
+// - CursorRuleTypeGlobal: always applied (alwaysApply: true)
+// - CursorRuleTypeFileGlobs: applied when file matches glob patterns
+// - CursorRuleTypeAgentFetched: agent decides when to fetch (has description)
+// - CursorRuleTypeManuallyAttached: manually attached by user
+// - CursorRuleSource: UNSPECIFIED, TEAM, USER
+
+================================================================================
+6. CLOUD RULES SERVICE (line 350253)
+================================================================================
+
+const CLOUD_SPECIFIC_INSTRUCTIONS_HEADER = "## Cursor Cloud specific instructions";
+const CLOUD_SPECIFIC_INSTRUCTIONS_SEPARATOR = `\n\n${CLOUD_SPECIFIC_INSTRUCTIONS_HEADER}\n`;
+
+class LocalCloudRulesService {
+    // Watches: [".cursor/CLOUD.md", "AGENTS.md"]
+
+    async load(ctx) {
+        const workspaceRoot = path.resolve(this.rootDirectory);
+        const cloudRulesPath = path.join(workspaceRoot, ".cursor", "CLOUD.md");
+        const agentsRulesPath = path.join(workspaceRoot, "AGENTS.md");
+
+        const [cloudRulesContent, agentsRulesContent] = await Promise.all([
+            readRulesFile(cloudRulesPath, "cloudRulesFilename", "CLOUD.md"),
+            readRulesFile(agentsRulesPath, "agentsRulesFilename", "AGENTS.md"),
+        ]);
+
+        if (!cloudRulesContent && !agentsRulesContent) return null;
+
+        // CLOUD.md only -> wrapped with header
+        if (!agentsRulesContent) {
+            return `${CLOUD_SPECIFIC_INSTRUCTIONS_HEADER}\n${cloudRulesContent}`;
+        }
+
+        // AGENTS.md only -> returned as-is
+        if (!cloudRulesContent) {
+            return agentsRulesContent;
+        }
+
+        // Both -> AGENTS.md content + separator + CLOUD.md content
+        return `${agentsRulesContent}${CLOUD_SPECIFIC_INSTRUCTIONS_SEPARATOR}${cloudRulesContent}`;
+    }
+}
+
+// NOTE: cloudRule is set on RequestContext.cloudRule and sent to the server
+// separately from the rules[] array. The server handles injecting it into
+// the system prompt differently.
+
+================================================================================
+7. AGENT SKILLS / SKILL.md LOADING (line 362570+)
+================================================================================
+
+class AgentSkillsCursorRulesService {
+    // Searches for SKILL.md files in these directories:
+    //   {workspace}/.cursor/rules/
+    //   {workspace}/.cursor/skills/
+    //   {workspace}/.agents/skills/
+    //   {workspace}/.claude/skills/    (if thirdPartyExtensibility enabled)
+    //   {workspace}/.codex/skills/     (if thirdPartyExtensibility enabled)
+    //   ~/.cursor/skills-cursor/       (builtin skills, user-level)
+    //   ~/.cursor/skills/              (user skills)
+    //   ~/.cursor/rules/               (user rules)
+    //   ... (same patterns for userHomeDirectory)
+
+    async loadAll(ctx) {
+        await this.initialBuiltinSkillsSyncPromise;
+        const rules = [];
+        const agentSkills = [];
+        for (const skillsDir of this.foldersToWatch) {
+            const skillFiles = await findSkillMdFilesRecursive(skillsDir);
+            for (const result of parsedFiles) {
+                rules.push(buildCursorRuleFromParsed(result));
+                agentSkills.push(buildAgentSkillFromParsed(result));
+            }
+        }
+        return { rules, agentSkills };
+    }
+}
+
+// parseSkillContent() - Parses SKILL.md files (line 360197)
+function parseSkillContent({ content, relativePath }) {
+    const parsed = matter(content);  // gray-matter for frontmatter
+    return {
+        path: relativePath,
+        name: parsed.data.name || fallbackName,
+        description: parsed.data.description,
+        globs: parseGlobs(parsed.data.globs),
+        alwaysApply: parsed.data.alwaysApply === true,
+        content,
+        environments,               // metadata.environments
+        disabledEnvironments,       // metadata.disabledEnvironments
+    };
+}
+
+// parseAgentContent() - Parses agent .md files (line 360265)
+function parseAgentContent({ content, relativePath }) {
+    const parsed = matter(content);
+    return {
+        path: relativePath,
+        name: parsed.data.name || fallbackName,
+        description: parsed.data.description,
+        tools: parsed.data.tools,       // comma-separated or array
+        model: parsed.data.model || "inherit",
+        prompt: parsed.content.trim(),  // body becomes system prompt
+        permissionMode,                 // "readonly" or "default"
+    };
+}
+
+================================================================================
+8. TOOL DEFINITIONS
+================================================================================
+
+// A. BuiltinTool enum (line 265786) - Server-side tools registered by name:
+enum BuiltinTool {
+    UNSPECIFIED = 0,
+    SEARCH = 1,              // Regex/text search over workspace
+    READ_CHUNK = 2,          // Read file chunks
+    GOTODEF = 3,             // Go to definition
+    EDIT = 4,                // Edit file
+    UNDO_EDIT = 5,           // Undo edit
+    END = 6,                 // End conversation
+    NEW_FILE = 7,            // Create new file
+    ADD_TEST = 8,            // Add test
+    RUN_TEST = 9,            // Run test
+    DELETE_TEST = 10,        // Delete test
+    SAVE_FILE = 11,          // Save file
+    GET_TESTS = 12,          // Get tests
+    GET_SYMBOLS = 13,        // Get symbols
+    SEMANTIC_SEARCH = 14,    // Semantic search
+    GET_PROJECT_STRUCTURE = 15,  // List project structure
+    CREATE_RM_FILES = 16,    // Create/remove files
+    RUN_TERMINAL_COMMANDS = 17,  // Run terminal commands
+    NEW_EDIT = 18,           // New edit format
+    READ_WITH_LINTER = 19,   // Read with lint info
+}
+
+// NOTE: The actual tool descriptions/schemas for builtin tools are NOT in the
+// exec-daemon. They are defined server-side (aiserver). The exec-daemon only
+// sends the BuiltinTool enum values.
+
+// B. MCP Tool Definitions (line 218695) - from MCP servers
+class McpToolDefinition extends Message {
+    name = "";                   // Full qualified name (e.g. "mcp__server__tool")
+    providerIdentifier = "";     // MCP server identifier
+    toolName = "";               // Tool name within the MCP server
+    description = "";            // Tool description
+    inputSchema;                 // JSON Schema as protobuf Value
+}
+
+// MCP tools are collected from all connected MCP servers and flattened:
+tools: mcp.servers
+    .flatMap(server => server.tools)
+    .map(tool => new McpToolDefinition({
+        name: tool.name,
+        providerIdentifier: tool.providerIdentifier,
+        toolName: tool.toolName,
+        description: tool.description,
+        inputSchema: tool.inputSchema ? Value.fromJson(tool.inputSchema) : undefined,
+    }))
+
+// C. MCP Meta-Tool Mode (line 347697)
+// When enabled, instead of individual MCP tools, uses GetMcpTools/CallMcpTool meta-tools
+function buildMcpMetaToolOptions(mcpState) {
+    const mcpDescriptors = mcpState.servers.map(server => {
+        const instructions = server.instructions
+            .map(i => i.instructions).filter(Boolean).join("\n");
+        return new McpDescriptor({
+            serverIdentifier: server.serverIdentifier,
+            serverName: server.serverName,
+            serverUseInstructions: instructions || undefined,
+            tools: server.tools.map(tool => new McpToolDescriptor({
+                toolName: tool.toolName,
+                description: tool.description,
+                inputSchema: tool.inputSchema !== undefined
+                    ? Value.fromJson(tool.inputSchema) : undefined,
+            })),
+        });
+    });
+    return new McpMetaToolOptions({ enabled: true, mcpDescriptors });
+}
+
+================================================================================
+9. CONVERSATION STATE & MESSAGE HYDRATION (line 369164)
+================================================================================
+
+// ConversationStateStructure (line 210554) - Persisted conversation state
+class ConversationStateStructure extends Message {
+    turnsOld = [];               // deprecated
+    rootPromptMessagesJson = []; // Current prompt messages (blob IDs)
+    turns = [];                  // Turn blobs
+    todos = [];                  // Todo items
+    pendingToolCalls = [];       // Raw JSON tool-call content parts
+    tokenDetails;                // Token usage details
+    summary;                     // User-requested summary
+    plan;                        // Plan blob
+    previousWorkspaceUris = [];
+    mode;                        // AgentMode enum
+    summaryArchives = [];        // Archived summarized messages
+    turnTimings = [];            // Per-turn timing info
+    fileStatesV2 = {};           // Map of file path -> FileStateStructure
+    subagentStates = {};         // Map of subagent ID -> SubagentPersistedState
+    selfSummaryCount = 0;
+    readPaths = [];              // Set of file paths read during conversation
+}
+
+// Message hydration: Reconstruct full conversation from blob store
+async function hydrateMessages(ctx, blobStore, state) {
+    // 1. Hydrate archived messages from summary_archives (if present)
+    const summaryArchives = await Promise.all(
+        state.summaryArchives.map(async summaryArchiveRef => {
+            const archiveBlob = await blobStore.getBlob(ctx, summaryArchiveRef);
+            const archive = ConversationSummaryArchive.fromBinary(archiveBlob);
+            return await hydrateBlobIds(ctx, blobStore, archive.summarizedMessages);
+        })
+    );
+    allMessages.push(...summaryArchives.flat());
+
+    // 2. Hydrate current prompt messages
+    const promptMessages = await hydrateBlobIds(ctx, blobStore, state.rootPromptMessagesJson);
+
+    // 3. Filter out system messages and summary messages from prompt tail
+    const tailMessages = promptMessages.filter(
+        msg => msg.role !== "system" && !isSummaryMessage(msg)
+    );
+
+    // 4. Concatenate archived + filtered tail
+    allMessages.push(...tailMessages);
+    return allMessages;
+}
+
+// AgentRunRequest (line 211080) - The full request sent to the server
+class AgentRunRequest extends Message {
+    conversationState;       // ConversationStateStructure
+    action;                  // ConversationAction (user message, etc.)
+    modelDetails;            // ModelDetails
+    requestedModel;          // RequestedModel
+    mcpTools;                // McpTools
+    conversationId;          // optional string
+    mcpFileSystemOptions;
+    skillOptions;
+    customSystemPrompt;      // optional string (allowlisted for specific teams only)
+    suggestNextPrompt;       // optional bool
+    subagentTypeName;        // optional string (e.g. "coordinator-agent", "explore")
+    excludeWorkspaceContext; // optional bool (strip all workspace-sourced context)
+}
+
+================================================================================
+10. XML TAG STRIPPING (line 369285)
+================================================================================
+
+// Tags stripped from transcripts (reveals system prompt structure):
+const XML_TAGS_TO_STRIP = [
+    "user_info",                      // User identity/account info
+    "rules",                          // Cursor rules content
+    "open_and_recently_viewed_files", // Open files context
+    "system_reminder",                // Hidden system reminders
+];
+
+// These XML tags are what the SERVER wraps around injected content in the
+// system prompt. The exec-daemon strips them when generating transcripts.
+
+function stripXmlTags(text) {
+    for (const tag of XML_TAGS_TO_STRIP) {
+        const pattern = new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, "g");
+        result = result.replace(pattern, "");
+    }
+    return result.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// Also strips hidden thinking tags:
+function stripHiddenThinkingTags(text) {
+    return text
+        .replace(/<think>[\s\S]*?<\/think>/gi, "")
+        .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+
+================================================================================
+11. SUBAGENT SYSTEM PROMPT MECHANISM (line 209770)
+================================================================================
+
+// UserMessage proto field for subagent system reminders:
+class UserMessage extends Message {
+    text = "";
+    messageId = "";
+    selectedContext;
+    mode;                       // AgentMode (normal, plan, ask)
+    isSimulatedMsg;
+    conversationStateBlobId;
+
+    // Hidden per-message system reminder channel
+    // Used by subagents, also for other internal reminders
+    // Added as separate userContent block like plan/ask mode reminders
+    // Stored raw; state wraps in <system_reminder> when rendering
+    subagentSystemReminder;     // optional string
+}
+
+// Subagent type configuration via AgentRunRequest:
+//   subagentTypeName: "coordinator-agent" | "explore" | etc.
+//   -> Backend looks up SubagentTypeConfig and applies overrides
+//      (system prompt, tools, model, etc.)
+
+// Custom system prompt (allowlisted teams only):
+//   customSystemPrompt: optional string -> overrides default system prompt
+
+================================================================================
+12. KEY ARCHITECTURAL INSIGHT
+================================================================================
+
+The actual system prompt TEXT is assembled SERVER-SIDE, not in the exec-daemon.
+The exec-daemon's role is to:
+
+1. COLLECT all context data (env, rules, tools, git, skills, notes, etc.)
+2. PACKAGE it into a RequestContext protobuf message
+3. SEND it alongside the ConversationStateStructure to the AI server
+
+The server then:
+- Builds the system prompt text using the RequestContext fields
+- Wraps rules in <rules> XML tags
+- Wraps user info in <user_info> tags
+- Wraps open files in <open_and_recently_viewed_files> tags
+- Injects system reminders in <system_reminder> tags
+- Adds tool definitions (builtin + MCP)
+- Applies cursor rules based on type (global=always, fileGlobbed=on match,
+  agentFetched=on-demand, manuallyAttached=user-attached)
+- Injects cloud rules (AGENTS.md + CLOUD.md) via the cloudRule field
+
+This split architecture means the exec-daemon is a data-collection layer,
+while the actual prompt engineering happens on Cursor's servers.
+
+The conversation state uses a blob-store pattern where messages are stored
+as binary blobs referenced by ID, allowing efficient persistence and
+resumption of conversations.

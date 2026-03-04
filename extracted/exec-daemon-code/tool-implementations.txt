@@ -1,0 +1,1450 @@
+================================================================================
+CURSOR EXEC-DAEMON TOOL IMPLEMENTATIONS
+Source: /exec-daemon/index.js (379,539 lines, bundled webpack)
+Extracted: 2026-03-04
+================================================================================
+
+TABLE OF CONTENTS
+  1. SANDBOX POLICY CONSTRUCTION & HARDCODED SECURITY
+  2. SANDBOX BINARY INVOCATION (cursorsandbox)
+  3. spawnInSandbox() - Main Entry Point
+  4. SHELL EXECUTION (LocalShellExecutor)
+  5. BACKGROUND SHELL EXECUTION (LocalBackgroundShellExecutor)
+  6. FILE READ (LocalReadExecutor)
+  7. FILE WRITE (LocalWriteExecutor)
+  8. FILE DELETE (LocalDeleteExecutor)
+  9. GREP / RIPGREP (LocalGrepExecutor)
+  10. WEB FETCH (LocalFetchExecutor)
+  11. COMPUTER USE - X11 Executor (xdotool + ffmpeg)
+  12. COMPUTER USE - Coordinate Scaling
+  13. COMPUTER USE - X11ComputerUseExecutor (wrapper)
+  14. SCREEN RECORDING (LocalRecordScreenExecutor)
+  15. FILE CHANGE TRACKING
+  16. EXECUTOR RESOURCE PATTERN (protobuf RPC bridge)
+
+================================================================================
+1. SANDBOX POLICY CONSTRUCTION & HARDCODED SECURITY
+   Source: ../shell-exec/dist/sandbox/hardcoded-policy.js
+   Lines: ~238452-238764
+================================================================================
+
+-- SSL certificate paths that are always readable --
+HARDCODED_SSL_CERT_PATHS = [
+    // macOS
+    "/etc/ssl/cert.pem",
+    "/System/Library/Keychains/SystemRootCertificates.keychain",
+    // Linux (Debian/Ubuntu)
+    "/etc/ssl/certs",
+    "/etc/ssl/certs/ca-certificates.crt",
+    // Linux (RHEL/CentOS/Fedora)
+    "/etc/ssl/ca-bundle.pem",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+];
+
+-- Hardcoded readonly paths (always readable, cannot be restricted) --
+function getHardcodedReadonlyPaths() {
+    const paths = [...HARDCODED_SSL_CERT_PATHS];
+    const homeDir = os.homedir();
+    if (homeDir.length > 0) {
+        paths.push(path.join(homeDir, ".ssh"));  // SSH dir for git operations
+    }
+    return paths;
+}
+
+-- Protected git patterns --
+const HARDCODED_PROTECTED_GIT_PATTERNS = [
+    ".git/hooks/**",
+    ".git/config",
+    ".git/config.worktree",
+    ".git/info/attributes",
+];
+
+-- Protected write patterns (ALWAYS blocked, agent cannot modify its own control plane) --
+const HARDCODED_PROTECTED_WRITE_PATTERNS = [
+    ".cursor/*.json",
+    ".cursor/**/*.json",
+    ".cursor/.workspace-trusted",
+    ".claude/*.json",
+    ".claude/**/*.json",
+    ".vscode/**",
+    "*.code-workspace",
+    "**/*.code-workspace",
+    ".cursorignore",
+    ...HARDCODED_PROTECTED_GIT_PATTERNS,
+];
+
+-- Subdirectories within .cursor that ARE allowed to be written --
+const CURSOR_ALLOWED_WRITE_SUBDIRS = [
+    ".cursor/rules",
+    ".cursor/commands",
+    ".cursor/worktrees",
+    ".cursor/skills",
+    ".cursor/agents",
+];
+
+-- Network deny list (currently empty, reserved for known-bad domains) --
+const HARDCODED_NETWORK_DENYLIST = [];
+
+-- Complete hardcoded sandbox policy --
+function getHardcodedSandboxPolicy() {
+    const networkPolicy = getHardcodedNetworkPolicy();
+    return {
+        type: "workspace_readwrite",
+        additionalReadonlyPaths: getHardcodedReadonlyPaths(),
+        ...(networkPolicy && { networkPolicy }),
+        networkPolicyStrict: true,  // Fail-closed on invalid network policy
+    };
+}
+
+-- Protected path checking (uses 'ignore' package for gitignore-style matching) --
+function isProtectedPath(relativePath) {
+    const normalizedPath = relativePath.replace(/\\/g, "/");
+    return getProtectedPathsIgnore().ignores(normalizedPath);
+}
+
+================================================================================
+2. SANDBOX BINARY INVOCATION (cursorsandbox)
+   Source: ../shell-exec/dist/sandbox/helper.js
+   Lines: ~239380-239565
+================================================================================
+
+The cursorsandbox binary is invoked with sandbox policy as JSON:
+
+  cursorsandbox --sandbox-policy-cwd <cwd> --sandbox-policy <json> [--policy-json <networkPolicyJson>] -- <command> [args...]
+
+-- Module-level configuration --
+let configuredSandboxBinaryPath;
+
+function configureSandboxPrereqs(options) {
+    const { sandboxBinaryPath } = options;
+    if (!configuredSandboxBinaryPath) {
+        configuredSandboxBinaryPath = sandboxBinaryPath;
+    }
+}
+
+function getSandboxBinary() {
+    return configuredSandboxBinaryPath;
+}
+
+-- spawnWithSandboxHelper() - The actual cursorsandbox invocation --
+function spawnWithSandboxHelper(command, args, options, sandboxPolicy) {
+    // Lines 239380-239515
+
+    // Determine actual command/args (handle shell wrapping)
+    let actualCommand = command;
+    let actualArgs = args;
+    if (options.shell) {
+        const shellPath = typeof options.shell === "string" ? options.shell : "/bin/sh";
+        actualCommand = shellPath;
+        actualArgs = ["-c", `${command} ${args.join(" ")}`];
+    }
+
+    // Convert ignoreMapping to JSON string
+    let ignoreMappingJson;
+    if (sandboxPolicy.ignoreMapping) {
+        const additionalReadwrite = sandboxPolicy.type === "workspace_readwrite"
+            ? sandboxPolicy.additionalReadwritePaths || []
+            : [];
+        const additionalReadonly = readonlyPaths;
+        ignoreMappingJson = convertIgnoreMappingToJson(
+            sandboxPolicy.ignoreMapping, cwd, additionalReadwrite, additionalReadonly
+        );
+    }
+
+    const networkAccessForRust = network_policy_utils_isNetworkEnabledByPolicy(
+        sandboxPolicy.networkPolicy
+    );
+
+    // === WORKSPACE_READONLY POLICY ===
+    if (sandboxPolicy.type === "workspace_readonly") {
+        const policy = {
+            type: "workspace_readonly",
+            cwd,
+            additionalReadonlyPaths: readonlyPaths,
+            networkAccess: networkAccessForRust,
+            ignoreMapping: ignoreMappingJson,
+        };
+        const policyJson = JSON.stringify(policy);
+        const networkPolicyArgs = buildNetworkPolicyArgs(sandboxPolicy);
+        const sandboxArgs = [
+            "--sandbox-policy-cwd", cwd,
+            "--sandbox-policy", policyJson,
+            ...networkPolicyArgs,
+            "--",
+            actualCommand,
+            ...actualArgs,
+        ];
+        const mergedEnv = {
+            ...process.env,
+            ...options.env,
+            CURSOR_SANDBOX: "native",
+        };
+        // Pass ripgrep path for Linux sandbox file discovery
+        const readonlyRgPath = getSandboxRipgrepPath();
+        if (readonlyRgPath) {
+            mergedEnv.EVERYSPHERE_RIPGREP_PATH = readonlyRgPath;
+        }
+        const child = child_process.spawn(
+            String(getSandboxBinary()), sandboxArgs, {
+                cwd: options.cwd || cwd,
+                env: mergedEnv,
+                stdio: options.stdio || ["pipe", "pipe", "pipe"],
+            }
+        );
+        return child;
+    }
+
+    // === WORKSPACE_READWRITE POLICY ===
+    const policy = {
+        type: "workspace_readwrite",
+        cwd,
+        additionalReadwritePaths: sandboxPolicy.additionalReadwritePaths || [],
+        additionalReadonlyPaths: readonlyPaths,
+        networkAccess: networkAccessForRust,
+        disableTmpWrite: sandboxPolicy.disableTmpWrite || false,
+        ignoreMapping: ignoreMappingJson,
+    };
+    const policyJson = JSON.stringify(policy);
+    const networkPolicyArgs = buildNetworkPolicyArgs(sandboxPolicy);
+    const sandboxArgs = [
+        "--sandbox-policy-cwd", cwd,
+        "--sandbox-policy", policyJson,
+        ...networkPolicyArgs,
+        "--",
+        actualCommand,
+        ...actualArgs,
+    ];
+    const mergedEnv = {
+        ...process.env,
+        ...options.env,
+        CURSOR_SANDBOX: "native",
+    };
+    const child = child_process.spawn(
+        String(getSandboxBinary()), sandboxArgs, {
+            cwd: options.cwd || cwd,
+            env: mergedEnv,
+            stdio: options.stdio || ["pipe", "pipe", "pipe"],
+        }
+    );
+    return child;
+}
+
+-- Network policy args for sandbox helper --
+function buildNetworkPolicyArgs(sandboxPolicy) {
+    const args = [];
+    if (sandboxPolicy.type === "insecure_none") return args;
+
+    const policy = sandboxPolicy.networkPolicy;
+    if (policy === undefined) return args;
+    if (!network_policy_utils_isNetworkEnabledByPolicy(policy)) return args;
+
+    // When default is "allow" with no deny list, skip proxy
+    // (proxy breaks programs that don't respect HTTP_PROXY)
+    const hasDenyList = policy.deny !== undefined && policy.deny.length > 0;
+    if (policy.default === "allow" && !hasDenyList) return args;
+
+    // Serialize policy to inline JSON
+    const policyJson = serializeNetworkPolicy(policy);
+    args.push("--policy-json", policyJson);
+
+    if (sandboxPolicy.networkPolicyStrict === false) {
+        args.push("--policy-strict=false");
+    }
+    return args;
+}
+
+================================================================================
+3. spawnInSandbox() - Main Entry Point
+   Source: ../shell-exec/dist/sandbox/sandbox.js
+   Lines: ~239596-239659
+================================================================================
+
+function sandbox_spawnInSandbox(command, args = [], options = {}, sandboxPolicy) {
+    options.env = filterElectronEnv(options.env);
+
+    // Apply shared build cache env vars if enabled
+    if (sandboxPolicy.enableSharedBuildCache) {
+        options = {
+            ...options,
+            env: {
+                ...filterElectronEnv(process.env),
+                ...getSandboxCacheEnv(),
+                ...options.env,
+            },
+        };
+    }
+
+    // Use a lightweight capability check
+    if (sandboxPolicy.type !== "insecure_none") {
+        if (isSandboxHelperSupported()) {
+            return spawnWithSandboxHelper(command, args, options, sandboxPolicy);
+        }
+        throw new Error(`Sandbox policy '${sandboxPolicy.type}' is not supported...`);
+    }
+
+    // Fallback: no sandbox
+    return child_process.spawn(command, args, options);
+}
+
+-- Shell environment overrides for consistent behavior --
+const SHELL_ENV_OVERRIDES = {
+    TERM: "dumb",       // Prevents ANSI color codes, SSH MOTD
+    NO_COLOR: "1",      // Disables color output
+    FORCE_COLOR: "0",   // Disables color for npm packages
+    _ZO_DOCTOR: "0",    // Disables zoxide doctor
+};
+
+================================================================================
+4. SHELL EXECUTION (LocalShellExecutor)
+   Source: ../local-exec/dist/shell.js
+   Lines: ~348403-348634
+================================================================================
+
+class LocalShellExecutor {
+    permissionsService;
+    coreExecutor;
+    ignoreService;
+
+    constructor(permissionsService, coreExecutor, ignoreService, _pendingDecisionProvider) {
+        this.permissionsService = permissionsService;
+        this.coreExecutor = coreExecutor;
+        this.ignoreService = ignoreService;
+    }
+
+    async execute(parentCtx, args) {
+        const command = args.command;
+        const policy = args.requestedSandboxPolicy
+            ? convertProtoToInternalPolicy(args.requestedSandboxPolicy)
+            : undefined;
+        const workingDirectory = args.workingDirectory || (await this.coreExecutor.getCwd());
+        const timeout = args.timeout || 30000;
+        const resolvedWorkingDir = resolvePath(workingDirectory);
+
+        if (!args.parsingResult) {
+            return ShellResult({ case: "spawnError", ... });
+        }
+
+        // Unified approval gating (skip if skip_approval is true)
+        let effectivePolicy;
+        if (!args.skipApproval) {
+            const decision = await this.permissionsService.shouldBlockShellCommand(
+                ctx, command, {
+                    workingDirectory: resolvedWorkingDir,
+                    timeout,
+                    parsingResult: args.parsingResult,
+                    toolCallId: args.toolCallId,
+                }, policy
+            );
+            if (decision.kind === "block") {
+                // Check if readonly block vs rejected
+                if (decision.reason.isReadonly) {
+                    return ShellResult({ case: "permissionDenied", ... });
+                }
+                return ShellResult({ case: "rejected", ... });
+            }
+            effectivePolicy = decision.policy;
+        } else {
+            effectivePolicy = policy;
+        }
+
+        // Add cursorignore mapping to effective policy
+        if (effectivePolicy && effectivePolicy.type !== "insecure_none") {
+            const ignoreMapping = await this.ignoreService.getCursorIgnoreMapping();
+            effectivePolicy = { ...effectivePolicy, ignoreMapping };
+        }
+
+        return this.executeWithPolicy(ctx, args, workingDirectory, timeout, effectivePolicy);
+    }
+
+    async executeWithPolicy(ctx, args, workingDirectory, timeout, policy) {
+        const startTime = Date.now();
+        const timeoutController = new AbortController();
+        const combinedSignal = ctx.signal
+            ? AbortSignal.any([ctx.signal, timeoutController.signal])
+            : timeoutController.signal;
+        const timer = setTimeout(() => timeoutController.abort(), timeout);
+
+        let stdout = "";
+        let stderr = "";
+        let exitCode = null;
+        let aborted = false;
+        let outputLocation;
+
+        // Wrap policy as merge sources for shell-exec
+        const sandboxPolicyMergeSources = policy ? { perRepo: policy } : undefined;
+
+        for await (const event of this.coreExecutor.execute(ctx, {
+            command: args.command,
+            workingDirectory,
+            signal: combinedSignal,
+            toolCallId: args.toolCallId,
+            sandboxPolicy: sandboxPolicyMergeSources,
+            fileOutputThresholdBytes: args.fileOutputThresholdBytes,
+            pipeStdin: false,
+        })) {
+            if (event.type === "stdout") stdout += event.data;
+            else if (event.type === "stderr") stderr += event.data;
+            else if (event.type === "exit") {
+                exitCode = event.code != null ? event.code | 0 : null;
+                outputLocation = event.outputLocation;
+                aborted = event.aborted;
+            }
+        }
+
+        clearTimeout(timer);
+        const executionTime = Date.now() - startTime;
+        return this.buildResultFromExit({
+            command: args.command,
+            workingDirectory,
+            exitCode: aborted ? -1 : (exitCode ?? -1),
+            signal: aborted ? "SIGTERM" : "",
+            stdout, stderr, executionTime,
+            sandboxPolicy: policy,
+            outputLocation,
+        });
+    }
+}
+
+================================================================================
+5. BACKGROUND SHELL EXECUTION (LocalBackgroundShellExecutor)
+   Lines: ~324597-324735
+================================================================================
+
+class LocalBackgroundShellExecutor {
+    permissionsService;
+    coreExecutor;
+    backgroundShellManager;
+
+    async execute(ctx, args) {
+        const command = args.command;
+        const policy = args.sandboxPolicy
+            ? convertProtoToInternalPolicy(args.sandboxPolicy)
+            : undefined;
+        const workingDirectory = args.workingDirectory || (await this.coreExecutor.getCwd());
+        const resolvedWorkingDir = resolvePath(workingDirectory);
+
+        // Check permissions before spawning
+        const blockResult = await this.permissionsService.shouldBlockShellCommand(
+            ctx, command, {
+                workingDirectory: resolvedWorkingDir,
+                timeout: 0,  // No timeout for background shells
+                parsingResult: args.parsingResult,
+                toolCallId: args.toolCallId,
+            }, policy
+        );
+
+        if (blockResult.kind === "block") {
+            // ... return permissionDenied or rejected
+        }
+
+        // Generate shell ID and spawn
+        const shellId = this.backgroundShellManager.generateShellId();
+        const sandboxPolicyMergeSources = blockResult.policy
+            ? { perRepo: blockResult.policy }
+            : undefined;
+
+        const spawnResult = await this.backgroundShellManager.spawn({
+            ctx, command,
+            workingDirectory: resolvedWorkingDir,
+            toolCallId: args.toolCallId,
+            sandboxPolicy: sandboxPolicyMergeSources,
+            shellId,
+            enableWriteShellStdinTool: args.enableWriteShellStdinTool,
+            description: args.description,
+        }, this.coreExecutor);
+
+        return BackgroundShellSpawnResult({
+            case: "success",
+            value: { shellId, command, workingDirectory, pid: spawnResult.pid },
+        });
+    }
+}
+
+================================================================================
+6. FILE READ (LocalReadExecutor)
+   Source: ../local-exec/dist/read.js
+   Lines: ~346058-346292
+================================================================================
+
+-- Constants --
+MAX_TEXT_SIZE = (defined elsewhere, truncation limit for text content)
+PDF_EXTENSION = ".pdf"
+
+class LocalReadExecutor {
+    permissionsService;
+    workspacePath;
+
+    async execute(ctx, args) {
+        const filePath = args.path;
+        const resolvedPath = resolvePath(filePath, this.workspacePath);
+
+        // Permission check with 3s watchdog
+        const shouldBlock = await watchdog(ctx, "permissionsService.shouldBlockRead", 3_000,
+            () => this.permissionsService.shouldBlockRead(resolvedPath)
+        );
+        if (shouldBlock) {
+            return ReadResult({ case: "permissionDenied", ... });
+        }
+
+        // Stat the file
+        const stats = await watchdog(ctx, "stat", 3_000, () => fs.stat(resolvedPath));
+        if (stats.isDirectory()) return ReadResult({ case: "invalidFile", reason: "Path is a directory" });
+        if (!stats.isFile()) return ReadResult({ case: "invalidFile", reason: "Path is neither a file nor a directory" });
+
+        // Determine content type
+        const contentInfo = await watchdog(ctx, "getFormatForFile", 3_000,
+            () => getFormatForFile(resolvedPath)
+        );
+        const isImage = contentInfo.isImageFile;
+        const isPdf = isPdfFilePath(resolvedPath);
+        const isVideo = isVideoFilePath(resolvedPath);
+
+        if (isImage) {
+            // Read and resize image if needed
+            const imageData = await fs.readFile(resolvedPath);
+            const resizedImage = resizeImageBufferIfNeeded(imageData);
+            return ReadResult({
+                case: "success",
+                value: { path: resolvedPath, output: { case: "data", value: resizedImage.data },
+                         totalLines: 0, fileSize: BigInt(stats.size), truncated: false },
+            });
+        }
+        else if (isPdf) {
+            // Read PDF as binary data
+            const pdfData = await fs.readFile(resolvedPath);
+            return ReadResult({
+                case: "success",
+                value: { path: resolvedPath, output: { case: "data", value: pdfData }, ... },
+            });
+        }
+        else if (contentInfo.isBinaryFile && isVideo) {
+            // Read video binary for passing to models like Gemini
+            const binaryData = await fs.readFile(resolvedPath);
+            return ReadResult({ case: "success", value: { output: { case: "data", value: binaryData }, ... } });
+        }
+        else if (contentInfo.isBinaryFile) {
+            return ReadResult({ case: "invalidFile", reason: `Binary files of type ${ext} are not supported` });
+        }
+        else {
+            // TEXT FILE: Read as text
+            const fullContent = await watchdog(ctx, "readText", 3_000, () => readText(resolvedPath));
+            const totalLines = await watchdog(ctx, "countLines", 3_000, () => countLines(fullContent));
+
+            // Apply offset/limit range if requested
+            const rangedRead = tryApplyRequestedReadRange(fullContent, totalLines, args);
+            let content = rangedRead.content;
+            let truncated = false;
+
+            // Truncate if content exceeds MAX_TEXT_SIZE
+            if (content.length > MAX_TEXT_SIZE) {
+                content = content.substring(0, MAX_TEXT_SIZE);
+                truncated = true;
+            }
+
+            return ReadResult({
+                case: "success",
+                value: {
+                    path: resolvedPath,
+                    output: { case: "content", value: content },
+                    totalLines, fileSize: BigInt(stats.size), truncated,
+                    rangeApplied: rangedRead.rangeApplied,
+                },
+            });
+        }
+    }
+}
+
+-- Range helper --
+function tryApplyRequestedReadRange(content, totalLines, args) {
+    if (args.offset === undefined && args.limit === undefined) {
+        return { content, rangeApplied: false };
+    }
+    if (content === "") return { content, rangeApplied: false };
+
+    const effectiveOffset = args.offset ?? 1;
+    const effectiveLimit = args.limit ?? (effectiveOffset < 0 ? Math.abs(effectiveOffset) : totalLines);
+    const startIndex = effectiveOffset < 0
+        ? Math.max(0, totalLines + effectiveOffset)
+        : Math.max(0, effectiveOffset - 1);
+
+    if (startIndex >= totalLines) return { content, rangeApplied: false };
+
+    const endIndex = Math.min(totalLines, startIndex + effectiveLimit);
+    const lines = content.split("\n");
+    return { content: lines.slice(startIndex, endIndex).join("\n"), rangeApplied: true };
+}
+
+================================================================================
+7. FILE WRITE (LocalWriteExecutor)
+   Source: ../local-exec/dist/write.js
+   Lines: ~349677-349927
+================================================================================
+
+class LocalWriteExecutor {
+    fileChangeTracker;
+    permissionsService;
+    pendingDecisionProvider;
+    workspacePaths;
+    workspacePath;
+    worktreeMainPath;
+    onWriteForAiTracking;
+
+    async execute(parentCtx, args) {
+        const path = args.path;
+        const fileText = args.fileText;
+        const fileBytes = args.fileBytes.length > 0 ? args.fileBytes : undefined;
+        const resolvedPath = resolvePath(path, this.workspacePath);
+
+        // Skip agent tracking for internal paths
+        const shouldSkipAgentTracking = isCursorProjectsInternalPath(resolvedPath, [
+            "agent-tools", "swarm-agents"
+        ]);
+
+        // Block worktree guard violations
+        if (shouldBlockWorktreePath({ targetPath: resolvedPath, ... })) {
+            return WriteResult({ case: "error", ... });
+        }
+
+        // Read existing content for change tracking
+        let beforeContent;
+        try { beforeContent = await readText(resolvedPath); } catch { }
+
+        // Permission check
+        const shouldBlock = await this.permissionsService.shouldBlockWrite(ctx, resolvedPath, fileText);
+        if (shouldBlock) {
+            // Handle needs approval, user rejected, permission denied
+            const blockResult = await handleBlockReason(shouldBlock, {
+                onNeedsApproval: async (approvalReason, approvalDetails) => {
+                    const result = await this.pendingDecisionProvider.requestApproval({
+                        type: OperationType.Write,
+                        details: { path, reason, isNewFile, diffString, before, after, blockReason },
+                        toolCallId: args.toolCallId,
+                    });
+                    if (!result.approved) return WriteResult({ case: "rejected", ... });
+                    return null;
+                },
+                onUserRejected: reason => WriteResult({ case: "rejected", ... }),
+                onPermissionDenied: (errorMessage, metadata) => WriteResult({ case: "permissionDenied", ... }),
+            });
+            if (blockResult !== null) return blockResult;
+        }
+
+        // Ensure directory exists
+        await fs.mkdir(dir, { recursive: true });
+
+        // Write file content
+        let buffer, lines;
+        if (fileBytes !== undefined) {
+            buffer = fileBytes;       // Binary mode
+            lines = 0;
+        } else {
+            // Text mode: apply line ending normalization
+            const textResult = await getBufferForWrite(resolvedPath, fileText, this.workspacePath);
+            buffer = textResult.buffer;
+            lines = textResult.lines;
+        }
+
+        await fs.writeFile(resolvedPath, buffer, { flush: true });
+        // Directory sync for durability
+        let dirHandle;
+        try {
+            dirHandle = await fs.open(path.dirname(resolvedPath), O_RDONLY);
+            await dirHandle.sync();
+        } catch { } finally { await dirHandle?.close(); }
+
+        // Track change
+        if (this.fileChangeTracker && fileBytes === undefined && !shouldSkipAgentTracking) {
+            await this.fileChangeTracker.trackChange(resolvedPath, beforeContent, fileText, metadata);
+        }
+
+        // AI code tracking callback (cursor-blame)
+        if (this.onWriteForAiTracking && fileBytes === undefined && !shouldSkipAgentTracking) {
+            try {
+                await this.onWriteForAiTracking({
+                    path: resolvedPath, beforeContent, afterContent: fileText, metadata
+                });
+            } catch (err) {
+                // Best-effort, don't fail the write
+            }
+        }
+
+        return WriteResult({
+            case: "success",
+            value: { path: resolvedPath, lines, bytes: buffer.byteLength },
+        });
+    }
+}
+
+================================================================================
+8. FILE DELETE (LocalDeleteExecutor)
+   Source: ../local-exec/dist/delete.js
+   Lines: ~327884-328128
+================================================================================
+
+class LocalDeleteExecutor {
+    pendingDecisionProvider;
+    fileChangeTracker;
+    permissionsService;
+    workspacePath;
+    onDeleteForAiTracking;
+
+    async execute(ctx, args) {
+        const path = args.path;
+        const resolvedPath = resolvePath(path, this.workspacePath);
+
+        // Permission check
+        const shouldBlock = await this.permissionsService.shouldBlockWrite(ctx, resolvedPath, "");
+        if (shouldBlock) {
+            // Handle block with approval flow...
+        }
+
+        // Always request explicit approval for deletes
+        const approvalResult = await this.pendingDecisionProvider.requestApproval({
+            type: OperationType.Delete,
+            details: { path: resolvedPath },
+            toolCallId: args.toolCallId,
+        });
+        if (!approvalResult.approved) return DeleteResult({ case: "rejected", ... });
+
+        // Verify file exists and is regular file
+        const stats = await fs.stat(resolvedPath);
+        if (!stats.isFile()) return DeleteResult({ case: "notFile", ... });
+
+        // Read content before deletion for change tracking
+        let fileContent;
+        try { fileContent = await readText(resolvedPath); } catch { }
+
+        // Delete the file
+        await fs.unlink(resolvedPath);
+
+        // Track the deletion
+        if (this.fileChangeTracker) {
+            await this.fileChangeTracker.trackChange(resolvedPath, fileContent, undefined, metadata);
+        }
+
+        return DeleteResult({ case: "success", value: { path, prevContent, fileSize } });
+    }
+}
+
+================================================================================
+9. GREP / RIPGREP (LocalGrepExecutor)
+   Source: ../local-exec/dist/grep.js
+   Lines: ~328784-329200
+================================================================================
+
+class LocalGrepExecutor {
+    ignoreService;
+    grepProvider;
+    workspacePath;
+
+    static MAIN_TIMEOUT_MS = 25_000;          // 25 second timeout
+    static HARD_MAX_OUTPUT_LINES = 10_000;     // Max lines from ripgrep
+    static CLIENT_LIMIT_LINES = 2_000;         // Max lines sent to client
+
+    async buildArgs(root, params, mode) {
+        const args = [];
+
+        // Use custom --cursor-ignore flag from forked ripgrep
+        // Ensures ignore rules cannot be overridden by glob patterns
+        const ignoreFiles = await this.ignoreService.listCursorIgnoreFilesByRoot(root);
+        for (const ignoreFile of ignoreFiles) {
+            args.push("--cursor-ignore", ignoreFile);
+        }
+
+        if (mode === "content") {
+            args.push("--line-number", "--with-filename", "--no-heading", "-0");
+            if (params.contextBefore !== undefined)
+                args.push("--before-context", String(params.contextBefore));
+            if (params.contextAfter !== undefined)
+                args.push("--after-context", String(params.contextAfter));
+            args.push("--max-columns", String(1000), "--max-columns-preview");
+            if (params.context !== undefined &&
+                params.contextBefore === undefined &&
+                params.contextAfter === undefined) {
+                args.push("--before-context", String(params.context),
+                           "--after-context", String(params.context));
+            }
+        } else if (mode === "files_with_matches") {
+            args.push("-l");
+        } else if (mode === "count") {
+            args.push("-c", "--with-filename");
+        }
+
+        if (params.caseInsensitive === true) args.push("--ignore-case");
+        else args.push("--case-sensitive");
+
+        if (params.type) args.push("--type", params.type);
+        if (params.glob) args.push("--iglob", params.glob);
+        if (params.multiline) args.push("--multiline", "--multiline-dotall");
+
+        const sortMode = params.sort ?? "modified";
+        if (sortMode !== "none") {
+            const flag = params.sortAscending === true ? "--sort" : "--sortr";
+            args.push(flag, sortMode);
+        }
+
+        args.push("--no-config", "--color=never");
+        args.push("--hidden");  // Include .cursor/rules etc.
+        args.push("--regexp", params.pattern);
+        args.push("--");
+        args.push(params.path ? this.computeRelativeTarget(params.path, root) : ".");
+        return args;
+    }
+
+    async executeRg(ctx, cwd, args, lineBudget, sandboxPolicy, logContext) {
+        const maxBytes = 8 * 1024 * 1024;  // 8MB output cap
+        lineBudget = lineBudget ?? LocalGrepExecutor.HARD_MAX_OUTPUT_LINES;
+
+        return new Promise((resolve, reject) => {
+            // Spawn ripgrep IN SANDBOX
+            let proc = spawnInSandbox(getRipgrepBinaryPath(), args, { cwd }, sandboxPolicy);
+
+            // Timeout
+            let timeoutId = setTimeout(() => {
+                if (!exited) {
+                    reject(new Error(`Timed out after ${LocalGrepExecutor.MAIN_TIMEOUT_MS / 1000}s`));
+                    proc.kill();
+                }
+            }, LocalGrepExecutor.MAIN_TIMEOUT_MS);
+
+            // Stream stdout with line budget enforcement
+            proc.stdout?.on("data", (d) => {
+                totalStdout += d.length;
+                if (lineBudget !== undefined && !lineBudgetExceeded) {
+                    // Count '\n' in chunk, find truncation point
+                    for (let i = 0; i < d.length; i++) {
+                        if (d[i] === 0x0a) {
+                            linesInChunk++;
+                            if (seenLines + linesInChunk >= lineBudget) {
+                                truncateIndex = i + 1;
+                                lineBudgetExceeded = true;
+                                proc.kill();  // Kill ripgrep when budget exceeded
+                                break;
+                            }
+                        }
+                    }
+                    seenLines += linesInChunk;
+                    const bufferToAdd = truncateIndex >= 0 ? d.subarray(0, truncateIndex) : d;
+                    if (totalStdout <= maxBytes) chunksStdout.push(bufferToAdd);
+                }
+            });
+
+            proc.on("close", (code) => {
+                const stdout = Buffer.concat(chunksStdout).toString("utf8");
+                const stderr = Buffer.concat(chunksStderr).toString("utf8");
+                resolve({ stdout, stderr, exitCode: code ?? 0 });
+            });
+        });
+    }
+
+    async execute(ctx, args, options) {
+        const mode = args.outputMode ?? "content";
+        const sandboxPolicy = convertProtoToInternalPolicy(args.sandboxPolicy);
+
+        // Run appropriate mode
+        switch (mode) {
+            case "files_with_matches": return this.runFilesMode(ctx, root, params, sandboxPolicy);
+            case "count": return this.runCountMode(ctx, root, params, sandboxPolicy);
+            case "content": return this.runContentMode(ctx, root, params, sandboxPolicy);
+        }
+    }
+
+    // Each mode: buildArgs -> executeRg -> parse output -> filter blocked repos
+    async runFilesMode(ctx, root, params, sandboxPolicy) {
+        const args = await this.buildArgs(root, params, "files_with_matches");
+        const res = await this.executeRg(ctx, root, args, undefined, sandboxPolicy);
+        const { files, totalFiles, clientTruncated, ripgrepTruncated } = parseFilesOutput(
+            res.stdout, CLIENT_LIMIT_LINES, HARD_MAX_OUTPUT_LINES
+        );
+        // Filter out files blocked by admin repo rules
+        const filteredFiles = [];
+        for (const file of files) {
+            if (!(await this.ignoreService.isRepoBlocked(file))) {
+                filteredFiles.push(file);
+            }
+        }
+        return GrepUnionResult({ case: "files", value: { files: filteredFiles, totalFiles, ... } });
+    }
+}
+
+KEY INSIGHT: Cursor uses a FORKED ripgrep with a custom --cursor-ignore flag
+that prevents ignore rules from being overridden by user glob patterns.
+
+================================================================================
+10. WEB FETCH (LocalFetchExecutor)
+    Source: ../local-exec/dist/fetch.js
+    Lines: ~328129-328174
+================================================================================
+
+class LocalFetchExecutor {
+    async execute(ctx, args) {
+        const url = args.url;
+        try {
+            const response = await fetch(url);
+            const content = await response.text();
+            const contentType = response.headers.get("content-type") || "text/plain";
+
+            return FetchResult({
+                case: "success",
+                value: { url, content, statusCode: response.status, contentType },
+            });
+        } catch (error) {
+            return FetchResult({ case: "error", value: { url, error: error.message } });
+        }
+    }
+}
+
+NOTE: This is a simple Node.js fetch() wrapper. Network sandboxing is handled
+at the sandbox level (proxy enforcement via cursorsandbox binary), not here.
+
+================================================================================
+11. COMPUTER USE - X11 Executor (xdotool + ffmpeg)
+    Source: ../local-exec/dist/computer-use/x11-executor.js
+    Lines: ~324904-325205
+================================================================================
+
+-- Helper functions --
+function exec(command, args, options) {
+    return new Promise((resolve, reject) => {
+        child_process.execFile(command, args.map(String), {
+            timeout: options?.timeoutMs ?? 30000,
+            env: options?.env ? { ...process.env, ...options.env } : undefined,
+            encoding: "utf8",
+        }, (error, stdout) => {
+            if (error) reject(error);
+            else resolve(stdout);
+        });
+    });
+}
+
+function execBuffer(command, args, options) {
+    return new Promise((resolve, reject) => {
+        child_process.execFile(command, args.map(String), {
+            timeout: options?.timeoutMs ?? 30000,
+            env: options?.env ? { ...process.env, ...options.env } : undefined,
+            maxBuffer: 50 * 1024 * 1024,  // 50MB max buffer
+            encoding: "buffer",
+        }, (error, stdout) => {
+            if (error) reject(error);
+            else resolve(stdout);
+        });
+    });
+}
+
+-- Timing constants --
+DEFAULT_SCREENSHOT_DELAY_MS = 2000;
+DEFAULT_TYPING_DELAY_MS = 12;      // ms between keystrokes
+DEFAULT_TYPING_BATCH_SIZE = 50;     // chars per xdotool type call
+
+-- Button/scroll mappings --
+const BUTTON_MAP = {
+    UNSPECIFIED: "1",  // default left
+    LEFT: "1",
+    MIDDLE: "2",
+    RIGHT: "3",
+    BACK: "8",
+    FORWARD: "9",
+};
+
+const SCROLL_BUTTON = {
+    UNSPECIFIED: 5,  // default down
+    UP: 4,
+    DOWN: 5,
+    LEFT: 6,
+    RIGHT: 7,  // (implied from pattern)
+};
+
+class X11Executor {
+    config;       // displayNum, resolution, screenshotDelayMs, typingDelayMs, typingBatchSize
+    scaler;       // CoordinateScaler instance
+    env;          // { DISPLAY: `:${displayNum}` }
+    inputEventLogger;  // Optional, for screen recording
+
+    xdotool(args) {
+        return exec("xdotool", args.split(" ").filter(Boolean), { env: this.env });
+    }
+
+    async execute(actions) {
+        const start = Date.now();
+        let cursorPosition;
+        let lastScreenshot;
+        let screenshotTaken = false;
+
+        for (const action of actions) {
+            if (action.action.case === "screenshot") {
+                await sleep(this.config.screenshotDelayMs);
+                lastScreenshot = await this.takeScreenshot();
+                screenshotTaken = true;
+            }
+            else if (action.action.case === "cursorPosition") {
+                const result = await this.executeAction(action);
+                if (result) cursorPosition = result;
+            }
+            else {
+                const commandStartTime = Date.now();
+                await this.executeAction(action);
+                const commandEndTime = Date.now();
+                // Log for screen recording if active
+                if (this.inputEventLogger?.getIsRunning()) {
+                    this.inputEventLogger.logEvent(action, commandStartTime, commandEndTime);
+                }
+            }
+        }
+
+        // Auto-screenshot if none were explicitly requested
+        if (!screenshotTaken) {
+            await sleep(this.config.screenshotDelayMs);
+            lastScreenshot = await this.takeScreenshot();
+        }
+
+        return {
+            success: true, screenshot: lastScreenshot ?? "",
+            cursorPosition, actionCount: actions.length,
+            durationMs: Date.now() - start,
+        };
+    }
+
+    async executeAction(action) {
+        switch (action.action.case) {
+            case "mouseMove": {
+                const { x, y } = this.scaleCoordinate(coord);
+                await this.xdotool(`mousemove --sync ${x} ${y}`);
+                break;
+            }
+            case "click": {
+                const { coordinate, button, count, modifierKeys } = actionOneof.value;
+                const buttonNum = BUTTON_MAP[button] ?? "1";
+                let clickArgs = buttonNum;
+                if (count > 1) clickArgs = `--repeat ${count} --delay 50 ${buttonNum}`;
+
+                const parts = [];
+                // Hold modifier keys (split combos like "ctrl+shift")
+                const modifiers = modifierKeys?.split("+").filter(Boolean) ?? [];
+                for (const mod of modifiers) parts.push(`keydown ${mod}`);
+
+                if (coordinate) {
+                    const { x, y } = this.scaleCoordinate(coordinate);
+                    parts.push(`mousemove --sync ${x} ${y}`);
+                }
+                parts.push(`click ${clickArgs}`);
+
+                // Release modifiers in reverse order
+                for (const mod of [...modifiers].reverse()) parts.push(`keyup ${mod}`);
+                await this.xdotool(parts.join(" "));
+                break;
+            }
+            case "mouseDown": {
+                await this.xdotool(`mousedown ${buttonNum}`);
+                break;
+            }
+            case "mouseUp": {
+                await this.xdotool(`mouseup ${buttonNum}`);
+                break;
+            }
+            case "drag": {
+                const { path, button } = actionOneof.value;
+                const scaledPath = path.map(coord => this.scaleCoordinate(coord));
+                const commands = [];
+                commands.push(`mousemove --sync ${scaledPath[0].x} ${scaledPath[0].y}`);
+                commands.push(`mousedown ${buttonNum}`);
+                for (let i = 1; i < scaledPath.length; i++) {
+                    commands.push(`mousemove --sync ${scaledPath[i].x} ${scaledPath[i].y}`);
+                }
+                commands.push(`mouseup ${buttonNum}`);
+                await this.xdotool(commands.join(" "));
+                break;
+            }
+            case "scroll": {
+                const { coordinate, direction, amount, modifierKeys } = actionOneof.value;
+                const scrollButton = SCROLL_BUTTON[direction] ?? 5;
+                const parts = [];
+                const modifiers = modifierKeys?.split("+").filter(Boolean) ?? [];
+                for (const mod of modifiers) parts.push(`keydown ${mod}`);
+                if (coordinate) {
+                    const { x, y } = this.scaleCoordinate(coordinate);
+                    parts.push(`mousemove --sync ${x} ${y}`);
+                }
+                parts.push(`click --repeat ${amount} ${scrollButton}`);
+                for (const mod of [...modifiers].reverse()) parts.push(`keyup ${mod}`);
+                await this.xdotool(parts.join(" "));
+                break;
+            }
+            case "type":
+                await this.typeText(text);
+                break;
+            case "key": {
+                if (holdDurationMs && holdDurationMs > 0) {
+                    await this.xdotool(`keydown ${key}`);
+                    await sleep(holdDurationMs);
+                    await this.xdotool(`keyup ${key}`);
+                } else {
+                    await this.xdotool(`key -- ${key}`);
+                }
+                break;
+            }
+            case "wait":
+                await sleep(actionOneof.value.durationMs);
+                break;
+            case "cursorPosition": {
+                const output = await this.xdotool("getmouselocation --shell");
+                const xMatch = output.match(/X=(\d+)/);
+                const yMatch = output.match(/Y=(\d+)/);
+                const displayX = parseInt(xMatch[1], 10);
+                const displayY = parseInt(yMatch[1], 10);
+                return this.scaler.displayToApi(displayX, displayY);
+            }
+        }
+    }
+
+    async typeText(text) {
+        const { typingDelayMs, typingBatchSize } = this.config;
+        const segments = text.split(/\r\n|\r|\n/);
+        for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+            const segment = segments[segIdx];
+            // Type in batches of typingBatchSize chars
+            for (let i = 0; i < segment.length; i += typingBatchSize) {
+                const chunk = segment.slice(i, i + typingBatchSize);
+                await exec("xdotool", ["type", "--delay", String(typingDelayMs), "--", chunk],
+                    { env: this.env });
+            }
+            // Press Return for newlines (xdotool type sends Linefeed for \n)
+            if (segIdx < segments.length - 1) {
+                await this.xdotool("key Return");
+            }
+        }
+    }
+
+    async takeScreenshot() {
+        const { width, height } = this.config.resolution.display;
+        const buffer = await execBuffer("ffmpeg", [
+            "-f", "x11grab",
+            "-video_size", `${width}x${height}`,
+            "-i", `:${this.config.displayNum}`,
+            "-frames:v", "1",
+            "-vf", `scale=${this.scaler.apiWidth}:${this.scaler.apiHeight}`,
+            "-c:v", "libwebp",
+            "-preset", "text",     // Optimized for UI screenshots
+            "-lossless", "1",
+            "-f", "webp",
+            "pipe:1",
+        ], { env: this.env });
+
+        // Fix WebP headers: ffmpeg can't seek in pipes, so RIFF/VP8 chunk sizes are 0
+        const isSimpleVP8WebP = buffer.length > 20 &&
+            buffer.subarray(0, 4).toString() === "RIFF" &&
+            buffer.subarray(8, 12).toString() === "WEBP" &&
+            buffer.subarray(12, 16).toString() === "VP8 ";
+        if (isSimpleVP8WebP) {
+            buffer.writeUInt32LE(buffer.length - 8, 4);    // RIFF size
+            buffer.writeUInt32LE(buffer.length - 20, 16);  // VP8 chunk size
+        }
+
+        return buffer.toString("base64");
+    }
+}
+
+================================================================================
+12. COMPUTER USE - Coordinate Scaling
+    Source: ../local-exec/dist/computer-use/scaling.js
+    Lines: ~324796-324855
+================================================================================
+
+API_WIDTH = 1280;         // What models see in screenshots
+DEFAULT_DISPLAY = ":1";   // Default X11 display
+
+class CoordinateScaler {
+    config;
+    xScaleUp; yScaleUp;     // API -> display
+    xScaleDown; yScaleDown;  // display -> API
+
+    constructor(config) {
+        // Validate aspect ratio match
+        const displayRatio = config.display.width / config.display.height;
+        const apiRatio = config.api.width / config.api.height;
+        if (Math.abs(displayRatio - apiRatio) > 0.02) {
+            throw new Error(`Aspect ratio mismatch`);
+        }
+
+        this.xScaleUp = config.display.width / config.api.width;     // e.g. 1920/1280 = 1.5
+        this.yScaleUp = config.display.height / config.api.height;    // e.g. 1200/800 = 1.5
+        this.xScaleDown = config.api.width / config.display.width;    // e.g. 1280/1920 = 0.667
+        this.yScaleDown = config.api.height / config.display.height;  // e.g. 800/1200 = 0.667
+    }
+
+    apiToDisplay(x, y) {
+        return { x: Math.round(x * this.xScaleUp), y: Math.round(y * this.yScaleUp) };
+    }
+
+    displayToApi(x, y) {
+        return { x: Math.round(x * this.xScaleDown), y: Math.round(y * this.yScaleDown) };
+    }
+}
+
+-- Display detection using xrandr --
+function getDisplay(override) {
+    return override ?? process.env.DISPLAY ?? DEFAULT_DISPLAY;
+}
+
+function parseDisplayNum(display) {
+    // Handles ":1", ":0.0", "localhost:1.0"
+    const colonIndex = display.lastIndexOf(":");
+    const afterColon = display.slice(colonIndex + 1);
+    const numStr = afterColon.split(".")[0];
+    return parseInt(numStr, 10);
+}
+
+================================================================================
+13. COMPUTER USE - X11ComputerUseExecutor (wrapper)
+    Source: ../local-exec/dist/computer-use/computer-use.js
+    Lines: ~325230-325379
+================================================================================
+
+class X11ComputerUseExecutor {
+    executor;  // X11Executor instance
+
+    constructor(config) {
+        this.executor = new X11Executor(config);
+    }
+
+    async saveScreenshotToTemp(ctx, screenshotBase64) {
+        const tempDir = path.join(os.tmpdir(), "computer-use");
+        await fs.mkdir(tempDir, { recursive: true });
+        const uuid = crypto.randomBytes(3).toString("hex").substring(0, 5);
+        const filename = `${uuid}.webp`;
+        const filepath = path.join(tempDir, filename);
+        const buffer = Buffer.from(screenshotBase64, "base64");
+        await fs.writeFile(filepath, buffer);
+        return filepath;
+    }
+
+    async execute(ctx, args) {
+        const startTime = Date.now();
+
+        const result = await this.executor.execute(args.actions);
+        const durationMs = Date.now() - startTime;
+
+        let screenshotPath;
+        if (result.screenshot) {
+            screenshotPath = await this.saveScreenshotToTemp(ctx, result.screenshot);
+        }
+
+        if (result.success) {
+            return ComputerUseResult({
+                case: "success",
+                value: {
+                    actionCount: result.actionCount,
+                    durationMs: result.durationMs,
+                    screenshot: result.screenshot,     // base64
+                    screenshotPath,                     // temp file path
+                    log: `Executed ${result.actionCount} actions`,
+                    cursorPosition,
+                },
+            });
+        }
+
+        // On error, try to capture a screenshot for debugging
+        try {
+            const errorScreenshot = await this.executor.execute([
+                new ComputerUseAction({ action: { case: "screenshot", value: new ScreenshotAction() } })
+            ]);
+            if (errorScreenshot.screenshot) {
+                errorScreenshotBase64 = errorScreenshot.screenshot;
+                errorScreenshotPath = await this.saveScreenshotToTemp(ctx, errorScreenshot.screenshot);
+            }
+        } catch { }
+
+        return ComputerUseResult({
+            case: "error",
+            value: { error: errorMessage, screenshot: errorScreenshotBase64, screenshotPath: errorScreenshotPath, ... },
+        });
+    }
+}
+
+================================================================================
+14. SCREEN RECORDING (LocalRecordScreenExecutor)
+    Source: ../local-exec/dist/record-screen.js
+    Lines: ~346362-346561+
+================================================================================
+
+class LocalRecordScreenExecutor {
+    activeRecording = null;
+    artifactsDir;           // Final output directory
+    stagingDir;             // Temp recording directory
+    display;
+    disablePolishedRendering;
+    polishedRenderer;       // Post-processing renderer (bundled with exec-daemon)
+
+    constructor(options) {
+        this.artifactsDir = options.artifactsDir;
+        this.stagingDir = options.stagingDir ?? RECORDING_STAGING_DIR;
+        this.display = options.display;
+        this.disablePolishedRendering = options.disablePolishedRendering ?? false;
+        this.polishedRenderer = options.polishedRenderer;
+        if (!this.disablePolishedRendering) {
+            this.polishedRenderer.assertAvailable();
+        }
+    }
+
+    async cleanupRecording(state) {
+        // Stop event logger
+        try { await state.inputEventLogger.stop(); } catch { }
+        // Stop ffmpeg
+        if (!state.childProcess.killed && state.childProcess.pid) {
+            try {
+                await this.stopFfmpegRecording(state);
+            } catch {
+                try { process.kill(state.childProcess.pid, "SIGKILL"); } catch { }
+            }
+        }
+    }
+
+    buildSessionDir(toolCallId) {
+        const sanitized = toolCallId.replace(/[^a-zA-Z0-9_-]/g, "_");
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        return path.join(this.stagingDir, `session-${timestamp}-${sanitized}`);
+    }
+
+    validateAndNormalizeSaveAsFilename(saveAsFilename) {
+        let filename = saveAsFilename.trim();
+        // Strip absolute path prefix if model includes it
+        if (filename.startsWith(this.artifactsDir)) {
+            filename = filename.slice(this.artifactsDir.length).replace(/^\//, "");
+        }
+        // Reject slashes, sanitize chars
+        filename = filename.replace(/[^a-zA-Z0-9 ._-]/g, "_");
+        if (filename.length > 128) filename = filename.slice(0, 128).trim();
+        if (!filename.toLowerCase().endsWith(".mp4")) filename = `${filename}.mp4`;
+        return { success: true, filename };
+    }
+}
+
+NOTE: Recording uses ffmpeg for X11 screen capture (x11grab), with
+an InputEventLogger for event-sourced preprocessing data used by
+the "polished-renderer" binary for producing high-quality output.
+
+================================================================================
+15. FILE CHANGE TRACKING
+    Source: ../local-exec/dist/file-change-tracker.js
+    Lines: ~328176-328338
+================================================================================
+
+class FileChangeTracker {
+    workspacePath;
+    changes = new Map();   // path -> { path, before, after, metadata }
+    listeners = new Set();
+
+    async trackChange(path, before, after, metadata) {
+        const existingChange = this.changes.get(path);
+        if (existingChange) {
+            // Merge: keep original "before" state
+            const originalBefore = existingChange.before;
+            if (originalBefore === after || (originalBefore === undefined && after === undefined)) {
+                // No net change - remove from tracking
+                this.changes.delete(path);
+            } else {
+                this.changes.set(path, { path, before: originalBefore, after, metadata });
+            }
+        } else {
+            this.changes.set(path, { path, before, after, metadata });
+        }
+        this.notify(change);
+    }
+
+    async reject(path) {
+        const change = this.changes.get(path);
+        if (!change) return;
+        if (change.before === undefined && change.after !== undefined) {
+            await fs.unlink(path);           // File was created -> delete
+        } else if (change.before !== undefined) {
+            await writeText(path, change.before);  // Restore original
+        }
+        this.changes.delete(path);
+    }
+}
+
+================================================================================
+16. EXECUTOR RESOURCE PATTERN (protobuf RPC bridge)
+    Source: ../agent-exec/dist/*.js
+    Lines: ~197530-197575
+================================================================================
+
+All tool executors are registered using the same pattern - a protobuf-based
+RPC bridge between the backend (server) and the exec-daemon (client):
+
+const computerUseExecutorResource = createResource(
+    execManager => new ExecutorResource(
+        execManager,
+        createServerSerializer("computerUseArgs"),
+        createClientDeserializer("computerUseResult")
+    ),
+    (implementation, controlledExecManager) => {
+        controlledExecManager.register(new SimpleControlledExecHandler(
+            implementation,
+            createServerDeserializer("computerUseArgs"),
+            createClientSerializer("computerUseResult")
+        ));
+    }
+);
+
+// Same pattern for all tools:
+const deleteExecutorResource = createResource(execManager => new ExecutorResource(
+    execManager, createServerSerializer("deleteArgs"), createClientDeserializer("deleteResult")), ...);
+
+const fetchExecutorResource = createResource(execManager => new ExecutorResource(
+    execManager, createServerSerializer("fetchArgs"), createClientDeserializer("fetchResult")), ...);
+
+const grepExecutorResource = createResource(execManager => new ExecutorResource(
+    execManager, createServerSerializer("grepArgs"), createClientDeserializer("grepResult")), ...);
+
+const hookExecutorResource = createResource(execManager => new ExecutorResource(
+    execManager, createServerSerializer("executeHookArgs"), createClientDeserializer("executeHookResult")), ...);
+
+// The LocalHookExecutorImpl wraps a HookExecutor for handling:
+// - preCompact hooks
+// - subagentStart hooks
+// - subagentStop hooks
+
+================================================================================
+ARCHITECTURE SUMMARY
+================================================================================
+
+TOOL EXECUTION FLOW:
+  Backend (Cursor server)
+    -> protobuf RPC over exec stream (ExecutorResource pattern)
+    -> exec-daemon (this file)
+    -> Local*Executor class
+    -> Permission check (permissionsService.shouldBlock*)
+    -> Sandbox policy construction (merge hardcoded + admin + per-repo)
+    -> spawnInSandbox() or direct fs operations
+
+SANDBOX WRAPPING:
+  Shell commands:
+    LocalShellExecutor -> coreExecutor.execute() -> spawnInSandbox()
+    -> cursorsandbox --sandbox-policy-cwd <cwd> --sandbox-policy <json> -- <shell> -c <cmd>
+
+  Grep:
+    LocalGrepExecutor -> executeRg() -> spawnInSandbox(ripgrepBinaryPath, args, ...)
+    -> cursorsandbox ... -- <ripgrep-fork> --cursor-ignore ... --regexp <pattern>
+
+  File operations (read/write/delete):
+    Direct Node.js fs operations (NOT sandboxed via cursorsandbox)
+    Permission checks via permissionsService
+    Protected path checking via isProtectedPath() (gitignore-style)
+
+  Computer use:
+    X11Executor -> xdotool (mouse/keyboard) + ffmpeg (screenshots)
+    NOT sandboxed (runs directly on X11 display)
+    Coordinate scaling: API resolution (1280x800) <-> display resolution (1920x1200)
+
+  Fetch:
+    Direct Node.js fetch() - network sandboxing at sandbox proxy level
+
+KEY PROPRIETARY ELEMENTS:
+  1. cursorsandbox binary - Rust binary implementing Landlock (Linux), seatbelt (macOS)
+  2. Forked ripgrep with --cursor-ignore flag (unforgeable ignore rules)
+  3. Sandbox policy JSON schema (workspace_readonly / workspace_readwrite / insecure_none)
+  4. Network policy proxy (allow/deny lists enforced by sandbox binary)
+  5. Protected write patterns preventing agent from modifying its own control plane
+  6. File change tracking with undo/redo support (cursor-blame integration)
+  7. Polished renderer for screen recording post-processing
