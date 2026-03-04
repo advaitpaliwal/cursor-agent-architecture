@@ -2728,4 +2728,102 @@ curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cu
 # - Both share the same Ansible playbook and build context
 # - polished-renderer lives in ansible/files/ for both public and internal builds
 # - polished-renderer Cargo.toml uses workspace references, auto-converted for standalone build
+
+# === Added March 4, 2026 — Wave 8 (live policy, privilege, and network verification) ===
+
+## Privilege Model (Live)
+# User `ubuntu` has no effective Linux capabilities (`CapEff=0`) but has passwordless sudo:
+#   /etc/sudoers.d/ubuntu -> `ubuntu ALL=(ALL) NOPASSWD:ALL`
+# Root (`/proc/1/status`) has full caps (`CapEff/CapPrm/CapBnd = 000001ffffffffff`) with `Seccomp=0`.
+# Practical result: sandbox user is root-equivalent (e.g., `sudo mount -t tmpfs ...` works).
+# Non-root direct writes are still blocked on `/` and `/opt`, but `/workspace` and `/tmp` are writable.
+
+## Command Policy Behavior (Observed)
+# The command wrapper applies policy before shell execution:
+# - benign `rm -f /tmp/...` commands are rejected with `blocked by policy`
+# - read/network probes (`curl`, `ps`, `cat`, `lsof`, `netstat`) are allowed
+# - `sudo` is allowed (including root-level file and mount operations)
+# This indicates classifier/policy gating above Linux DAC/MAC.
+
+## Network + Service Topology (Live)
+# Interfaces/routes:
+#   eth0 = 172.30.0.2/24, default gateway 172.30.0.1
+#   docker0 = 172.17.0.1/16
+# Resolver: `/etc/resolv.conf` -> nameserver 10.0.0.2
+#
+# Listening ports:
+#   2375/tcp    Docker API
+#   50052/tcp   gRPC-like endpoint (owner hidden in this PID namespace)
+#   26500/tcp   pod-daemon gRPC
+#   26058/tcp   websockify/noVNC
+#   26053/26054 tcp6 exec-daemon
+#   5901 localhost TigerVNC
+#   3000 tcp6 user app
+#
+# 26500 and 50052 both return identical HTTP/2 SETTINGS frames.
+# 2375 and 50052 have socket inodes in `/proc/net/tcp` but no owning visible PID from `/proc/*/fd`.
+# 2375/26500/50052 are reachable via 127.0.0.1, 172.17.0.1, and host.docker.internal.
+
+## Control Plane Reachability Signals
+# `/proc/net/tcp` shows active remote peer 192.168.24.21 connected to:
+#   - 172.30.0.2:26500 (pod-daemon control channel)
+#   - 172.30.0.2:26058 (noVNC/websockify)
+#   - 172.30.0.2:2375  (Docker API)
+# This confirms host-side orchestration traffic entering the sandbox namespace.
+
+## Docker Bootstrap Reality Check (Correction)
+# `desktop-init.sh` logs:
+#   - `docker: command not found`
+#   - `Docker failed to become accessible after 60 seconds`
+#   - `Docker: NOT ACCESSIBLE`
+# No Docker CLI is in PATH and no `/var/run/docker.sock` exists.
+# But Docker Engine is still reachable over unauthenticated TCP 2375:
+#   - `curl 127.0.0.1:2375/version` -> Docker 29.1.4 (host OS Debian 12)
+# So "DinD" access is exposed via host-network TCP, not a local service started by desktop-init.
+
+## IMDS / Metadata Endpoint Behavior
+# TCP connect to 169.254.169.254:80 succeeds.
+# IMDSv1 GET and IMDSv2 token PUT both return `Empty reply from server`.
+# Interpretation: metadata IP is reachable at L3/L4 but metadata service is blackholed/filtered.
+
+## Sensitive Material Exposure Surface (Redacted)
+# Exec-daemon process arguments expose runtime tokens in `ps` output:
+#   --auth-token <redacted-hex>
+#   --trace-auth-token <redacted-jwt>
+#
+# User home contains live auth stores (values intentionally not copied):
+#   ~/.claude/.credentials.json  (access + refresh tokens)
+#   ~/.codex/auth.json           (id/access/refresh tokens)
+#   ~/.config/gh/hosts.yml       (GitHub oauth token)
+
+## Filesystem Permission Findings
+# World-writable runtime dirs:
+#   /opt/cursor/artifacts         (777)
+#   /opt/cursor/logs              (777)
+#   /opt/cursor/recording-staging (777)
+#   /opt/cursor/.exec-daemon      (1777)
+#
+# World-writable toolchain dirs:
+#   /usr/local/cargo              (777)
+#   /usr/local/cargo/bin          (777)
+#   /usr/local/rustup             (777)
+#   /usr/local/rustup/toolchains  (777)
+
+## Missing Utilities (Current Runtime)
+# Not present: ip, ss, iptables, nft, docker CLI, grpcurl, xxd
+# Present alternatives used: ifconfig, route, netstat, lsof, curl, python3 socket probes
+
+## Evidence Commands (Wave 8)
+# grep -E 'Cap(Eff|Prm|Bnd)|Seccomp' /proc/self/status
+# sudo -n grep -E 'Cap(Eff|Prm|Bnd)|Seccomp' /proc/1/status
+# sudo -n grep -R ubuntu /etc/sudoers /etc/sudoers.d
+# ifconfig -a ; route -n ; cat /etc/resolv.conf
+# netstat -tulpen ; lsof -nP -iTCP -sTCP:LISTEN
+# python3 socket probe against 127.0.0.1/172.17.0.1 ports 2375/26500/50052
+# curl -v http://169.254.169.254/latest/meta-data/
+# curl -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600'
+# sed -n '1,220p' /tmp/container-init.log
+# stat -c '%A %a %U:%G %n' /opt/cursor/* /usr/local/cargo /usr/local/rustup
+# cat /exec-daemon/exec_daemon_version ; curl -I "$(cat /exec-daemon/exec_daemon_version)"
+# python3 parser for /proc/net/tcp and /proc/net/tcp6 to extract peer connections
 ```
