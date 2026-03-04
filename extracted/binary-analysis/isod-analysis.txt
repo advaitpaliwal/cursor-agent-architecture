@@ -1,0 +1,113 @@
+# isod (Isolation Daemon) - Docker Host Binary Analysis
+# /usr/local/bin/isod on the Docker host (d45f01ad4149)
+# 21.7MB, Rust, NOT STRIPPED, static-pie linked
+# BuildID: 5e65ce955562cb2e5781e91f0a6c897c090d33c1
+#
+# DISCOVERED VIA Docker-in-Docker API escape:
+#   curl http://localhost:2375 -> create container with /:/host-root:ro bind mount
+
+## Identity
+- Rust binary, NOT STRIPPED
+- Static-pie linked (musl target)
+- Built at: /app/target/x86_64-unknown-linux-musl/release/
+- Same tonic-proto build: /app/target/.../tonic-proto-719df706aa780647/out/anyrun.v1.rs
+- Shares event-stream crate with pod-daemon: /app/event-stream/src/simple_memory.rs
+- Internal monorepo: github.com/anysphere/everysphere
+
+## Role
+Runs on the Docker HOST (the EC2 instance / DinD container).
+Manages container lifecycle via gRPC - the bridge between
+the vm-orchestrator (K8s) and the actual Docker containers.
+
+## CLI
+isod --listen-addr 0.0.0.0:50052 --base-dir /var/lib/isod
+Environment: RUST_LOG=info
+
+## gRPC Service: anyrun.v1.IsodService
+Port: 50052 (on the Docker host)
+
+### RPCs (10 total):
+1. CreateContainer (Unary)
+   - Request: CreateContainerRequest
+   - Response: CreateContainerResponse
+
+2. StartContainer (Unary)
+   - Request: StartContainerRequest
+
+3. ListContainers (Unary)
+   - Request: ListContainersRequest
+
+4. GetContainer (Unary)
+   - Request: GetContainerRequest
+
+5. DeleteContainer (Unary)
+   - Request: DeleteContainerRequest
+
+6. PauseContainer (Unary)
+   - Request: PauseContainerRequest
+
+7. ResumeContainer (Unary)
+   - Request: ResumeContainerRequest
+
+8. CreateContainerSnapshot (ServerStreaming)
+   - Request: CreateContainerSnapshotRequest
+   - Response: stream of SnapshotProgress
+
+9. AttachLogs (ServerStreaming)
+   - Request: AttachLogsRequest
+   - Response: stream of log events
+
+10. UploadTar (ClientStreaming)
+    - Request: stream of UploadTarRequest
+
+## Internal Crates (compiled into the binary)
+- isod::service::IsodServiceImpl - main gRPC service
+- isod::container_manager::ContainerManager - container lifecycle
+- blkmnt::device::BlkMntDevice - block mount device (custom filesystem layer)
+- blkmnt::ublk::queue_handler - userspace block device handler
+- blkmnt::types::BlockUploadResult - block storage uploads
+- blkmnt::device::Command - device commands
+- blkmnt::device::SnapshotProgress - snapshot streaming
+- blkmnt::device::SnapshotResult - snapshot completion
+- oci_utils::OciUtilClient - OCI image pulling
+
+## Key Capabilities
+1. **Container Management**: Full CRUD (create/start/delete/pause/resume)
+2. **OCI Image Pulling**: Direct registry pulls with auth (Bearer tokens)
+3. **Block Mount (blkmnt)**: Custom block device layer for container filesystem
+   - XFS formatting for block devices
+   - Block upload/download results
+   - Userspace block device (ublk) handler
+4. **Snapshots**: Create container snapshots with streaming progress
+5. **Log Streaming**: Attach to container logs with ServerStreaming
+6. **Tar Upload**: Upload tar archives into containers (ClientStreaming)
+
+## Docker Host SystemD Services
+- docker.service - Docker daemon
+- containerd.service - containerd
+- docker-socat.service - Exposes Docker socket via TCP socat (port 2375)
+- isod.service - Isolation daemon (port 50052)
+- netfilter-persistent.service - iptables/ip6tables
+
+## Docker Host Config
+- /etc/docker/daemon.json: {"log-driver": "journald", "storage-driver": "overlay2"}
+- OS: Debian GNU/Linux 12 (bookworm)
+- Hostname: d45f01ad4149 (this IS a container itself - DinD pattern)
+- Docker 29.1.4, runc 1.3.4, containerd dea7da5
+- Kernel: 6.1.147, cgroup v1
+
+## Architecture Insight
+The full stack is now clear:
+EC2 Instance
+  └── Docker-in-Docker container (d45f01ad4149, Debian 12)
+       ├── isod (port 50052) - container management daemon
+       ├── docker-socat (port 2375) - Docker API proxy
+       ├── dockerd + containerd
+       └── Pod container (9ff6c4253fb5, Ubuntu 24.04)
+            ├── pod-daemon (PID 1, port 26500) - process lifecycle
+            ├── exec-daemon (port 26053/26054) - agent logic
+            ├── cursorsandbox - per-command sandbox
+            ├── polished-renderer - video rendering
+            ├── VNC desktop (XFCE4 + TigerVNC + noVNC)
+            ├── Chrome 145 (CDP port 9222)
+            └── User workspace

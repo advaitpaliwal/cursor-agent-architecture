@@ -1,0 +1,101 @@
+# exec-daemon CLI Flags (Complete)
+# Extracted from webpack bundle Commander.js option definitions
+
+--pty-websocket-port <port>       # Port for PTY WebSocket connections (26054)
+--rg-path <path>                  # Path to ripgrep binary
+--browser-enabled                 # Enable browser/CDP features
+--cursor-self-control-enabled     # Allow Cursor to control itself
+--mcp-config <json>               # MCP server configuration JSON
+--mcp-oauth-server-urls <json>    # MCP OAuth server URLs
+--http-mcp-tools-file <path>      # File path for HTTP MCP tools
+--cloud-rules-enabled             # Enable cloud-based cursor rules
+--computer-use-enabled            # Enable computer use (mouse/keyboard control)
+--secret-redaction-enabled        # Enable secret redaction in output
+--chrome-executable-path <path>   # Path to Chrome binary
+--record-screen-enabled           # Enable screen recording
+--generate-image-enabled          # Enable image generation
+--sandbox-enabled                 # Enable cursorsandbox command wrapping
+--sandbox-helper-path <path>      # Path to cursorsandbox binary
+--sandbox-policy <json>           # Sandbox policy JSON config
+--claude-md-enabled               # Enable CLAUDE.md file processing
+--no-claude-md-enabled            # Disable CLAUDE.md
+--trace-endpoint <url>            # OTEL trace endpoint (e.g. https://api2.cursor.sh)
+--trace-auth-token <token>        # Auth token for trace endpoint
+--ghost-mode <boolean>            # Privacy mode (disables tracing)
+--trace-insecure <boolean>        # Skip SSL verification for traces
+
+# Key URLs
+CURSOR_API_BASE_URL = process.env.CURSOR_API_BASE_URL ?? "https://api2.cursor.sh"
+CURSOR_WEBSITE_URL  = process.env.CURSOR_WEBSITE_URL  ?? "https://cursor.com"
+
+# Azure Blob Storage (VSCode Remote)
+cursor.blob.core.windows.net/remote-releases/${commit}/vscode-reh-${osValue}-${archValue}.tar.gz
+
+# CursorVM Manager Domains (20 clusters)
+https://dev.cursorvm-manager.com
+https://eval1.cursorvm-manager.com
+https://eval2.cursorvm-manager.com
+https://test1.cursorvm-manager.com
+https://train1.cursorvm-manager.com
+https://train2.cursorvm-manager.com
+https://train3.cursorvm-manager.com
+https://train4.cursorvm-manager.com
+https://train5.cursorvm-manager.com
+https://us1.cursorvm-manager.com
+https://us1p.cursorvm-manager.com
+https://us3.cursorvm-manager.com
+https://us3p.cursorvm-manager.com
+https://us4.cursorvm-manager.com
+https://us4p.cursorvm-manager.com
+https://us5.cursorvm-manager.com
+https://us5p.cursorvm-manager.com
+https://us6.cursorvm-manager.com
+https://us6p.cursorvm-manager.com
+
+# All Environment Variables Referenced
+BUF_BIGINT_DISABLE
+CI
+CLICOLOR_FORCE
+CLOUD_AGENT_INJECTED_SECRET_NAMES
+CURSOR_API_BASE_URL
+CURSOR_CONFIG_DIR
+CURSOR_DATA_DIR
+__CURSOR_SANDBOX_ENV_RESTORE
+CURSOR_WEBSITE_URL
+DEBUG
+DISPLAY
+__FAKE_FS_O_FILENAME__
+__FAKE_PLATFORM__
+FORCE_COLOR
+GRPC_DEFAULT_SSL_ROOTS_FILE_PATH
+GRPC_EXPERIMENTAL_ENABLE_OUTLIER_DETECTION
+GRPC_NODE_TRACE
+GRPC_NODE_USE_ALTERNATIVE_RESOLVER
+GRPC_NODE_VERBOSITY
+GRPC_SSL_CIPHER_SUITES
+GRPC_TRACE
+GRPC_VERBOSITY
+HOME
+HTTP_PROXY
+HTTPS_PROXY
+JEST_WORKER_ID
+LOG_LEVEL
+NO_COLOR
+NODE_V
+NO_PROXY
+OSTYPE
+OTEL_EXPORTER_OTLP_METRICS_PROTOCOL
+OTEL_EXPORTER_OTLP_PROTOCOL
+OTEL_EXPORTER_PROMETHEUS_HOST
+OTEL_EXPORTER_PROMETHEUS_PORT
+OTEL_SEMCONV_STABILITY_OPT_IN
+PATH
+PATHEXT
+SHELL
+TERM
+UNDICI_NO_FG
+USER
+VSCODE_VERSION
+WS_NO_BUFFER_UTIL
+WS_NO_UTF_
+XDG_CONFIG_HOME

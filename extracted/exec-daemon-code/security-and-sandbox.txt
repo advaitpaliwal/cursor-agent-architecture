@@ -1,0 +1,78 @@
+# Security, Sandbox, and Network Policy Schemas
+# Extracted from exec-daemon webpack bundle
+
+## SandboxPolicy.Type (agent.v1)
+0: TYPE_UNSPECIFIED
+1: TYPE_INSECURE_NONE         # No sandboxing at all
+2: TYPE_WORKSPACE_READWRITE   # Read+write within workspace
+3: TYPE_WORKSPACE_READONLY    # Read-only workspace access
+
+## SandboxPolicy Fields
+- type: SandboxPolicy.Type
+- network_access: optional bool
+- additional_readwrite_paths: repeated string
+- additional_readonly_paths: repeated string
+- debug_output_dir: optional string
+- disable_tmp_write: optional bool  # Excludes /tmp, /private/tmp, /var/folders/
+
+## NetworkPolicy (agent.v1)
+- version: optional uint32 (must be 1)
+- default_action: DefaultAction enum
+- deny: repeated string  # Highest priority - domains, wildcards, CIDR
+- allow: repeated string  # Domains, wildcards, CIDR
+- logging: optional NetworkPolicyLoggingConfig
+
+## NetworkPolicy.DefaultAction
+0: DEFAULT_ACTION_UNSPECIFIED
+1: DEFAULT_ACTION_ALLOW
+2: DEFAULT_ACTION_DENY
+
+## CommandClassifierResult.SuggestedSandboxMode (agent.v1)
+# Gemini-powered command classifier output
+0: SUGGESTED_SANDBOX_MODE_UNSPECIFIED
+1: SUGGESTED_SANDBOX_MODE_SANDBOX
+2: SUGGESTED_SANDBOX_MODE_NO_SANDBOX
+3: SUGGESTED_SANDBOX_MODE_UNDETERMINED
+
+## CloudAgentEgressProtectionMode (aiserver.v1)
+0: CLOUD_AGENT_EGRESS_PROTECTION_MODE_UNSPECIFIED
+1: CLOUD_AGENT_EGRESS_PROTECTION_MODE_ALLOW_ALL
+2: CLOUD_AGENT_EGRESS_PROTECTION_MODE_DEFAULT_WITH_NETWORK_SETTINGS
+3: CLOUD_AGENT_EGRESS_PROTECTION_MODE_NETWORK_SETTINGS_ONLY
+
+## SandboxingMode (aiserver.v1)
+0: SANDBOXING_MODE_UNSPECIFIED
+1: SANDBOXING_MODE_ENABLED
+2: SANDBOXING_MODE_DISABLED
+
+## NetworkingMode (aiserver.v1)
+0: NETWORKING_MODE_UNSPECIFIED
+1: NETWORKING_MODE_USER_CONTROLLED
+2: NETWORKING_MODE_ALWAYS_DISABLED
+
+## GitMode (aiserver.v1)
+0: GIT_MODE_UNSPECIFIED
+1: GIT_MODE_USER_CONTROLLED
+2: GIT_MODE_ALWAYS_DISABLED
+
+## CustomSubagentPermissionMode (agent.v1)
+0: CUSTOM_SUBAGENT_PERMISSION_MODE_UNSPECIFIED
+1: CUSTOM_SUBAGENT_PERMISSION_MODE_DEFAULT
+2: CUSTOM_SUBAGENT_PERMISSION_MODE_READONLY
+
+## TimeoutBehavior (agent.v1)
+0: TIMEOUT_BEHAVIOR_UNSPECIFIED
+1: TIMEOUT_BEHAVIOR_CANCEL
+2: TIMEOUT_BEHAVIOR_BACKGROUND
+
+## BackgroundComposerSecretLevel (aiserver.v1)
+0: BACKGROUND_COMPOSER_SECRET_LEVEL_UNSPECIFIED
+1: BACKGROUND_COMPOSER_SECRET_LEVEL_ENVIRONMENT_VARIABLE
+2: BACKGROUND_COMPOSER_SECRET_LEVEL_INJECTED_SECRET
+
+## PrivacyMode (aiserver.v1)
+0: PRIVACY_MODE_UNSPECIFIED
+1: PRIVACY_MODE_NO_STORAGE
+2: PRIVACY_MODE_NO_TRAINING
+3: PRIVACY_MODE_USAGE_DATA_TRAINING_ALLOWED
+4: PRIVACY_MODE_USAGE_CODEBASE_TRAINING_ALLOWED

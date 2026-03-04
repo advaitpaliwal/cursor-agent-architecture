@@ -1,0 +1,35 @@
+# polished-renderer Binary Analysis
+# /opt/cursor/polished-renderer/polished-renderer - 6.1MB, Rust, NOT STRIPPED
+# BuildID: e41b2334bad0d6721ef3dd003fcb55cfa6340aad
+# Dynamically linked (uses system libs)
+
+## Identity
+- Rust binary, NOT STRIPPED
+- N-API addon (loaded by Node.js exec-daemon)
+- 16 compilation units (CGUs)
+- Two CGU groups: polished_renderer.1a1243d9... and polished_renderer.9db239de...
+
+## Role
+- Video rendering for screen recordings
+- Takes render-plan.json as input
+- Produces MP4 video output
+- Used by RecordScreen tool (RECORDING_MODE_START/SAVE/DISCARD)
+
+## Key Fields (from render-plan.json)
+- videoDur (duration)
+- videoHei (height)
+- videoWid (width)
+- videoPat (output path)
+- render_proxy_full (proxy rendering mode)
+
+## Source Code
+Full Rust source available at /opt/cursor/ansible/files/polished-renderer/
+(extracted to extracted/polished-renderer/ - 7,171 lines, 33 files)
+
+## Rendering Pipeline
+See extracted/polished-renderer/src/ for full implementation:
+- Frame capture from VNC/X11
+- Video encoding (likely via ffmpeg/libx264)
+- Motion planning and cursor animation
+- Idle classification (loading wait, viewing result, thinking pause, long operation)
+- Motion styles: slow, mellow, quick, rapid

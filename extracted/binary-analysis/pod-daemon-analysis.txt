@@ -1,0 +1,54 @@
+# pod-daemon Binary Analysis
+# /pod-daemon - 7.9MB, Rust, NOT STRIPPED, static-pie linked
+# BuildID: 83c327e927c0bd08a35e8d0dd0c6a0a5609ebfa3
+
+## Identity
+- Rust binary (rustc 6b00bc388... nightly)
+- Built at: /app/target/x86_64-unknown-linux-musl/release/
+- Internal crate: pod_daemon
+- Proto source: /app/target/x86_64-unknown-linux-musl/release/build/tonic-proto-719df706aa780647/out/anyrun.v1.rs
+- Internal monorepo path: /app/event-stream/src/simple_memory.rs
+
+## Stack
+- axum (web framework)
+- tonic 0.13.1 (gRPC framework)
+- tokio 1.48.0 (async runtime)
+- hyper 1.8.1 (HTTP)
+- clap 3.2.25 (CLI args)
+- h2 0.4.12 (HTTP/2)
+- prost 0.13.5 (protobuf)
+- tracing (instrumentation)
+
+## gRPC Service: anyrun.v1.PodDaemonService
+Port: 26500 (plaintext gRPC, no reflection)
+
+### RPCs:
+1. CreateProcess (Unary)
+   - Request: CreateProcessRequest { command, working_directory, env }
+   - Response: CreateProcessResponse
+
+2. AttachProcess (ServerStreaming)
+   - Request: AttachProcessRequest { pid, last_event_id }
+   - Response: stream of ProcessEvent
+
+## Internal Types
+- ProcessOutputEvent (used in event-stream MemoryBackedStream)
+- ProcessEvent (streamed via gRPC)
+- Config (parsed via clap Args derive)
+
+## Key Functions (demangled)
+- pod_daemon::process_manager::ProcessManager::new
+- pod_daemon::process_manager::ProcessManager::create_process
+- pod_daemon::process_manager::ProcessManager::attach_process
+- pod_daemon::process_manager::ProcessManager::send_output_event
+- pod_daemon::process_manager::ProcessManager::shutdown
+- pod_daemon::server::PodDaemonServer::into_service
+- pod_daemon::config::Config (clap Args + Debug)
+- pod_daemon::shutdown_signal
+
+## Role
+PID 1 in the container. Manages process lifecycle.
+Creates/attaches to processes (like exec-daemon, cursorsandbox).
+Streams process output events back to the orchestrator.
+The orchestrator (vm-orchestrator) calls CreateProcess to start
+exec-daemon, then AttachProcess to stream its stdout/stderr.

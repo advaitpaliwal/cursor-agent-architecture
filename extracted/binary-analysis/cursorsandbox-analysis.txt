@@ -1,0 +1,117 @@
+# cursorsandbox Binary Analysis
+# /exec-daemon/cursorsandbox - 4.5MB, Rust, STRIPPED, static-pie linked
+# BuildID: e9c797b84b672ab7d3dd2d0982d5328100427f24
+
+## Identity
+- Rust binary, STRIPPED (no debug symbols)
+- Static-pie linked (no external dependencies)
+- Contains HTTP proxy for network policy enforcement
+
+## Sandbox Creation Pipeline (7 Steps)
+
+### Step 0/7: Pre-discovery (before namespace)
+- Scans workspace for files matching glob patterns
+- Discovers .cursorignore, .code-workspace, .git/ structure
+- Uses bundled ripgrep for file discovery
+- Computes glob deny actions (file-suffix rules)
+- Pre-discovers symlinks in .git/hooks
+
+### Step 1-2/7: Create Namespaces
+- Creates user namespaces (network_isolated flag)
+- Two modes:
+  - Helper mode: uses newuidmap/newgidmap (nested namespaces)
+  - Setgroups deny mode: writes /proc/self/setgroups
+- Writes uid_map and gid_map
+- Switches to root in namespace (setresuid/setresgid)
+
+### Step 2.5/7: Loopback Setup
+- Sets up loopback interface in network namespace
+
+### Step 3/7: Remount MS_PRIVATE
+- Remounts / as MS_PRIVATE to prevent mount propagation
+- Falls back gracefully if EPERM
+
+### Step 4/7: Mount Denies
+- Applies file-system deny rules via bind mounts
+- bind RO (read-only), bind RW (read-write), blackhole mounts
+- Hides directories with tmpfs mounts
+- Blocks git hooks directories
+- Blocks symlink targets outside workspace
+- Devices: stages /dev/null, /dev/zero, /dev/random, /dev/urandom
+- Creates /dev/pts, /dev/shm, /dev/fd (symbolic links)
+- /dev/tty with mode=755, /dev/stdin, /dev/stdout, /dev/stderr
+
+### Step 5/7: Landlock (Linux Security Module)
+- Creates Landlock V3 ruleset
+- Adds write-allow rules for specific paths
+- Calls restrict_self() to enforce
+- Status tracking: CURSOR_SANDBOX_LANDLOCK_STATUS env var
+  - fully_enforced: All restrictions active
+  - partially_enforced: Some restrictions couldn't be applied
+  - not_enforced: Kernel doesn't support Landlock
+- File-only access rules separate from directory rules
+
+### Step 5.5/7: Seccomp Dangerous Syscall Block
+- Applies seccomp BPF filter for dangerous syscalls
+- Limit on number of BPF instructions
+
+### Step 6/7: Seccomp Network Block
+- Blocks network syscalls via seccomp
+- Skipped if network access is allowed in policy
+- Forces all network through HTTP proxy
+
+### Step 6.5/7: Drop Capabilities
+- Drops all bypass capabilities
+- Final privilege reduction
+
+### Step 7/7: Change Working Directory
+- Changes to the specified CWD
+- Executes the target command
+
+## Network Policy Enforcement
+- HTTP proxy on 127.0.0.1 (set via HTTP_PROXY env var)
+- SOCKS5 proxy support
+- CONNECT tunnel for HTTPS
+- Decision types:
+  - "deny list" - explicitly denied domain
+  - "not on allow list" - not in allowlist
+  - "allowed by default" - default allow policy
+  - "policy invalid" - malformed policy
+  - "unsupported protocol" - non-HTTP(S)
+  - "invalid IPv6 host" - bad IPv6
+  - "missing host header" - no Host in request
+- Decision logging to file
+- "Blocked by sandbox network policy" / "Connection reset by network"
+- Blackhole: bind mount to prevent bypass
+
+## CLI Flags
+--policy-json <json>       # Full sandbox policy as JSON
+--sandbox-policy-cwd       # Working directory for sandboxed command
+--run-proxy                # Start in proxy-only mode
+--files                    # File discovery flags
+--no-ignore                # Don't respect gitignore
+--no-ignore-vcs            # Don't respect VCS ignore
+--no-config                # Don't read config files
+--max-depth 6              # Max directory traversal depth
+
+## Security Features
+- .cursorignore support (gitignore-style)
+- .code-workspace awareness
+- Git hooks blocking (prevents malicious hooks)
+- Symlink target validation
+- File suffix deny rules (glob-based)
+- SSL certificate paths: /etc/ssl/cert.pem, /etc/ssl/certs/ca-certificates.crt,
+  /etc/ssl/ca-bundle.pem, /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
+
+## Environment Variables
+- CURSOR_SANDBOX_LANDLOCK_STATUS: Reports Landlock enforcement level
+- CURSOR_SANDBOX_MOUNT_CAP: Mount capability flag
+- EVERYSPHERE_SANDBOX_DEBUG: Debug mode flag
+- __CURSOR_SANDBOX_ENV_RESTORE: Environment restoration
+- HTTP_PROXY: Set to local proxy address
+
+## Error Modes
+- ERR missing_policy: No policy provided
+- Failed to apply sandbox: Sandbox creation error
+- Failed to parse sandbox policy: JSON parse error
+- Failed to start network proxy: Proxy startup failure
