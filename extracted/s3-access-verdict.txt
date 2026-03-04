@@ -1,0 +1,10 @@
+S3 bucket probing verdict (public-asphr-vm-daemon-bucket):
+
+- Unknown paths return uniform HTTP 403.
+- This means you cannot distinguish "exists but denied" from "does not exist" by status code.
+- Prefix/path brute-force enumeration is effectively blocked.
+- Artifact access is content-addressable by exact hash in object path:
+  exec-daemon/exec-daemon-x64-{sha256}.tar.gz
+- Practical acquisition paths:
+  1) Read /exec-daemon/exec_daemon_version from a running sandbox.
+  2) Observe new sandbox sessions over time as deployments roll.

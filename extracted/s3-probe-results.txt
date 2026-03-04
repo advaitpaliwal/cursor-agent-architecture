@@ -1,0 +1,29 @@
+S3 probe timestamp: 2026-03-04 23:09 UTC
+Bucket: public-asphr-vm-daemon-bucket (us-east-1)
+
+Known object probe:
+- URL: /exec-daemon/exec-daemon-x64-e11bf2731fbec97c4727b661f83720499761ba2f96cf8cc17212b7b25a3136ac.tar.gz
+- HTTP: 200
+- Content-Length: 70431929
+- Last-Modified: Wed, 04 Mar 2026 16:32:21 GMT
+- SSE: AES256
+
+Unknown object probes:
+- URL: /exec-daemon/exec-daemon-x64-0000000000000000000000000000000000000000000000000000000000000000.tar.gz
+  HTTP: 403
+- URL: /exec-daemon/exec-daemon-x64-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.tar.gz
+  HTTP: 403
+
+Bucket root probe:
+- URL: /
+- HTTP: 403
+
+Prefix probes:
+- /exec-daemon/      -> 403
+- /cursorsandbox/    -> 403
+- /polished-renderer/-> 403
+- /node/             -> 403
+- /rg/               -> 403
+- /gh/               -> 403
+- /agent/            -> 403
+- /pod-daemon/       -> 403
