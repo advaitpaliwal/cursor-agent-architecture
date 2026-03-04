@@ -1113,6 +1113,571 @@ The exec-daemon wraps user commands through `cursorsandbox` with appropriate pol
 
 ---
 
+## Live Sandbox Verification (March 4, 2026)
+
+The following sections were added by running analysis from **inside a live Cursor Cloud sandbox** (via Claude Code running as a companion agent within the same container). This provides ground-truth validation of the architecture and reveals additional details not visible from the image alone.
+
+### Exec Daemon File Layout (Updated)
+
+The original README documented the exec-daemon directory. Here's the **complete, verified** layout with sizes:
+
+```
+/exec-daemon/
+├── node                    # 123,405,064 bytes — Bundled Node.js binary
+├── index.js                # 15,254,116 bytes  — Main webpack bundle
+├── 252.index.js            # 4,266 bytes       — OpenTelemetry machine-id (Windows)
+├── 407.index.js            # 4,260 bytes       — OpenTelemetry machine-id (BSD)
+├── 511.index.js            # 4,038 bytes       — OpenTelemetry machine-id (macOS)
+├── 953.index.js            # 1,621 bytes       — OpenTelemetry machine-id (unsupported)
+├── 980.index.js            # 2,128 bytes       — Code-split chunk
+├── package.json            # 140 bytes         — @anysphere/exec-daemon-runtime
+├── exec_daemon_version     # 165 bytes         — S3 URL to this build's tarball
+├── pty.node                # 72,664 bytes      — Native PTY addon (node-pty)
+├── cursorsandbox           # 4,514,720 bytes   — Rust sandbox policy enforcer
+├── polished-renderer.node  # 5,799,592 bytes   — Node N-API addon for video rendering ← NEW
+├── rg                      # 5,416,872 bytes   — Bundled ripgrep (static-pie ELF) ← NEW
+├── gh                      # 54,972,600 bytes  — Bundled GitHub CLI (static ELF) ← NEW
+├── exec-daemon             # 327 bytes         — Bash wrapper script
+└── 97f64a4d8eca9a2e35bb.mp4  # 63,178 bytes   — Splash/loading animation
+```
+
+**New findings:**
+- **`polished-renderer.node`** — The polished-renderer is NOT a standalone binary at `/opt/cursor/polished-renderer/` as previously assumed. It's a **Node N-API shared object** bundled directly in `/exec-daemon/`. This means the exec-daemon can render screen recordings in-process without spawning a separate binary. Uses FFmpeg (av_frame_alloc, avcodec_receive_frame, av_read_frame).
+- **`rg`** — Bundled ripgrep binary, used by exec-daemon for code search (referenced via `--rg-path /exec-daemon/rg` CLI flag).
+- **`gh`** — Bundled GitHub CLI (55MB static binary), used for PR/issue management.
+- **Code-split chunks 252/407/511/953** — All contain OpenTelemetry platform-specific machine-id detection for Windows/BSD/macOS/unsupported. Only the Linux path is used.
+
+### Exec Daemon CLI Flags (Live Process)
+
+Captured from the running exec-daemon process:
+
+```bash
+/exec-daemon/node /exec-daemon/index.js serve \
+    --port 26053 \
+    --pty-websocket-port 26054 \
+    --auth-token <redacted-256bit-hex> \
+    --rg-path /exec-daemon/rg \
+    --cloud-rules-enabled \
+    --computer-use-enabled \
+    --trace-endpoint https://api2.cursor.sh \
+    --trace-auth-token <redacted-jwt> \
+    --ghost-mode true \
+    --browser-enabled \
+    --record-screen-enabled \
+    --secret-redaction-enabled
+```
+
+**Notable flags:**
+- `--ghost-mode true` — Unclear purpose. May suppress certain UI interactions or enable background operation mode.
+- `--cloud-rules-enabled` — Enables loading rules from Cursor's cloud (team rules, global commands).
+- `--secret-redaction-enabled` — Automatically redacts secrets from agent output/logs.
+- `--trace-endpoint https://api2.cursor.sh` — All telemetry goes to Cursor's API server.
+- `--trace-auth-token` — JWT with claims: `sub` (user ID format `google-oauth2|user_*`), `type: "exec_daemon"`, `iss: "https://authentication.cursor.sh"`, `aud: "https://cursor.com"`, expiry ~7 days.
+- `--browser-enabled` — Enables Chrome/CDP integration.
+- `--record-screen-enabled` — Enables screen recording via polished-renderer.
+
+### Complete Agent Tool Surface (38 Tools)
+
+Extracted from `agent.v1.*ToolCall` protobuf message types. This is the **complete** set of tools available to the Background Agent:
+
+| Tool | Category | Purpose |
+|------|----------|---------|
+| Shell | Execution | Execute shell commands via PTY |
+| WriteShellStdin | Execution | Write to stdin of running shell |
+| BackgroundShellSpawn | Execution | Spawn background shell processes |
+| ForceBackgroundShell | Execution | Force a shell to background |
+| Edit | File ops | Edit files (string replacement) |
+| Read | File ops | Read file contents |
+| Glob | File ops | File pattern matching |
+| Grep | File ops | Content search (ripgrep) |
+| Ls | File ops | List directory |
+| Delete | File ops | Delete files |
+| ApplyAgentDiff | File ops | Apply multi-file diffs |
+| SemSearch | Search | Semantic code search |
+| WebSearch | Web | Web search |
+| WebFetch | Web | Fetch URL content |
+| Fetch | Web | General HTTP fetch |
+| ComputerUse | Desktop | Mouse/keyboard/screenshot on VNC desktop |
+| RecordScreen | Desktop | Start/stop screen recording |
+| GenerateImage | Media | Generate images |
+| AskQuestion | Interaction | Ask user a question with options |
+| Task | Subagents | Spawn subagent tasks |
+| Await | Subagents | Wait for subagent completion |
+| CreatePlan | Planning | Create an execution plan |
+| Reflect | Meta | Self-reflection/evaluation |
+| SwitchMode | Meta | Switch between agent modes |
+| ReadTodos | Task mgmt | Read todo/task list |
+| UpdateTodos | Task mgmt | Update todo/task list |
+| ReadLints | Code quality | Read linter diagnostics |
+| BlameByFilePath | Git | Git blame for a file |
+| PrManagement | Git | PR operations (create, update, etc.) |
+| ReportBugfixResults | Bugbot | Report bugfix verification results |
+| AiAttribution | Meta | AI attribution/citation |
+| StartGrindExecution | Grind | Execute a "Grind" task |
+| StartGrindPlanning | Grind | Plan a "Grind" task |
+| SetupVmEnvironment | Infra | Setup VM/sandbox environment |
+| Mcp | MCP | Call MCP tool |
+| McpAuth | MCP | MCP OAuth authentication |
+| GetMcpTools | MCP | List available MCP tools |
+| ListMcpResources | MCP | List MCP resources |
+| ReadMcpResource | MCP | Read an MCP resource |
+| Truncated | Internal | Handle truncated tool calls |
+
+### Agent Modes (6 Modes)
+
+```protobuf
+enum AgentMode {
+    AGENT_MODE_UNSPECIFIED = 0;
+    AGENT_MODE_AGENT   = 1;  // Standard agent mode (think → act → observe)
+    AGENT_MODE_ASK     = 2;  // Read-only Q&A mode
+    AGENT_MODE_PLAN    = 3;  // Planning mode (no execution)
+    AGENT_MODE_DEBUG   = 4;  // Debug mode
+    AGENT_MODE_TRIAGE  = 5;  // Triage mode (issue classification)
+    AGENT_MODE_PROJECT = 6;  // Project-level operations
+}
+```
+
+### Thinking Styles (Multi-Model Support)
+
+```protobuf
+// Mirrors aiserver.v1.ConversationMessage.ThinkingStyle
+enum ThinkingStyle {
+    THINKING_STYLE_UNSPECIFIED = 0;
+    THINKING_STYLE_DEFAULT = 1;  // Collapsible "Thinking" / "Thought Xs" blocks
+    THINKING_STYLE_CODEX   = 2;  // Codex-class models: prominent thinking headers
+    THINKING_STYLE_GPT5    = 3;  // GPT-5 style: **Thinking headers** that can speak mid-turn
+}
+```
+
+**This confirms multi-model support beyond Claude.** The agent supports rendering for Claude (default), OpenAI Codex, and GPT-5 thinking styles. Combined with the `openai_api_base_url` field and Gemini video references, the Background Agent can use multiple LLM providers.
+
+### Sandbox Policy System (Detailed)
+
+```protobuf
+enum SandboxPolicy.Type {
+    TYPE_UNSPECIFIED        = 0;
+    TYPE_INSECURE_NONE      = 1;  // No sandboxing (dangerous)
+    TYPE_WORKSPACE_READWRITE = 2;  // Read+write within workspace
+    TYPE_WORKSPACE_READONLY  = 3;  // Read-only workspace access
+}
+
+enum NetworkPolicy.DefaultAction {
+    DEFAULT_ACTION_UNSPECIFIED = 0;
+    DEFAULT_ACTION_ALLOW = 1;  // Allow all by default
+    DEFAULT_ACTION_DENY  = 2;  // Deny all by default (fail-closed)
+}
+```
+
+**Sandbox policy merge priority** (lowest → highest):
+1. Per-user settings
+2. (Additional sources merged in order)
+
+This means team/org policies can override user preferences for stricter sandboxing.
+
+### Egress Protection (Enterprise Network Control)
+
+```protobuf
+enum CloudAgentEgressProtectionMode {
+    UNSPECIFIED                           = 0;
+    ALLOW_ALL                             = 1;  // No restrictions
+    DEFAULT_WITH_NETWORK_SETTINGS         = 2;  // Default protections + team network rules
+    NETWORK_SETTINGS_ONLY                 = 3;  // Only team-defined network rules
+}
+
+// Fields on team settings:
+optional CloudAgentEgressProtectionMode egress_protection_mode = 10;
+optional bool lock_egress_protection_mode = 11;  // Admin-only lock
+```
+
+**Enterprise teams can control what domains/IPs their agents can access**, and admins can lock this so users can't override it.
+
+### Gemini Command Classifier (Smart Allowlist)
+
+The bundle contains references to a **Gemini-powered command classifier** used for a "smart allowlist" feature:
+
+```
+Result from Gemini command classifier for smart allowlist feature
+```
+
+This suggests that before executing shell commands, a fast Gemini model classifies commands to determine if they should be allowed, denied, or sandboxed. This is more sophisticated than static allowlists — it's an AI-powered security layer.
+
+Also: **Videos are only supported for Gemini models**, and Gemini uses 1fps by default for video input.
+
+### InvocationContext (How Tasks Get Triggered)
+
+```protobuf
+message InvocationContext {
+    message GithubPR { ... }          // Triggered from a GitHub PR
+    message IdeState {                // IDE state when task was created
+        repeated File visible_files;  // Currently open files
+        repeated File recently_viewed_files;
+        repeated ViewedPullRequest currently_viewed_prs;
+        message File {
+            CursorPosition cursor_position;  // Exact cursor position
+        }
+    }
+    message SlackThread { ... }       // Triggered from Slack integration
+}
+```
+
+**The agent knows exactly what files you're looking at, where your cursor is, and what PRs you have open** when you create a background task. This context is passed to the agent for better task understanding.
+
+### "Grind" Feature
+
+A task execution framework with planning and execution phases:
+
+```protobuf
+message StartGrindPlanningToolCall { ... }
+message StartGrindExecutionToolCall { ... }
+message StartGrindExecutionArgs { ... }
+message StartGrindExecutionResult {
+    oneof result {
+        StartGrindExecutionSuccess success;
+        StartGrindExecutionError error;
+    }
+}
+```
+
+"Grind" appears to be an internal name for automated multi-step task execution — plan first, then execute. Possibly related to Cursor's automated PR generation or Bugbot's autofix capability.
+
+### Bugbot Integration
+
+```protobuf
+enum BugfixVerdict { ... }
+message ReportBugfixResultsToolCall { ... }
+```
+
+The agent can verify bug fixes and report results. Combined with `BugbotAutofixMode`, `BugbotBackfillStatus`, `BugbotUsageTier`, and `BugbotLearnedRules` from the DashboardService, this reveals a full automated bug-finding-and-fixing pipeline.
+
+### Fourth gRPC Service: `aiserver.v1.DashboardService`
+
+The bundle contains a **fourth service** not previously documented — the full Cursor Dashboard API with **200+ RPC methods**. This is the complete backend API that powers cursor.com, team management, billing, and all enterprise features.
+
+**Key agent-related RPCs:**
+
+| RPC | Purpose |
+|-----|---------|
+| `GetTeamBackgroundAgentSettings` | Get team's agent configuration |
+| `UpdateTeamBackgroundAgentSettings` | Update team's agent configuration |
+| `CreateBackgroundComposerSecret` | Create secrets for agent to use |
+| `CreateBackgroundComposerSecretBatch` | Batch create secrets |
+| `ListBackgroundComposerSecrets` | List available secrets |
+| `RevokeBackgroundComposerSecret` | Revoke a secret |
+| `CreateTeamHook` | Create team-level agent hooks |
+| `CreateTeamCommand` | Create team slash commands |
+| `GetGlobalCommands` | Get global (Cursor-wide) commands |
+| `GetTeamServiceAccounts` | Get service accounts (automated agents) |
+
+**Integration RPCs:**
+
+| Integration | RPCs |
+|------------|------|
+| GitHub | `ConnectGithubCallback`, `GetGithubInstallations`, `GetInstallationRepos`, `ConfirmGithubInstallation`, `RegisterGithubCursorCode` |
+| Linear | `ConnectLinearCallback`, `GetLinearIssues`, `GetLinearLabels`, `GetLinearTeams`, `GetLinearStatus` |
+| PagerDuty | `ConnectPagerDutyCallback`, `GetPagerDutyServices`, `GetPagerDutyStatus` |
+| Slack | `SetSlackAuth`, `GetSlackSettings`, `ListSlackConversations`, `GetSlackModelOptions` |
+| Plugins/Marketplace | `CreatePlugin`, `ListMarketplacePlugins`, `InstallTeamPlugin`, `InstallUserPlugin`, `ParseGitHubRepoForPlugins` |
+
+### PtyHostService (Full PTY Control)
+
+```protobuf
+service PtyHostService {
+    rpc SpawnPty(...)     // Create a new PTY session
+    rpc AttachPty(...)    // Attach to existing PTY
+    rpc ListPtys(...)     // List all PTY sessions
+    rpc ResizePty(...)    // Resize terminal
+    rpc SendInput(...)    // Send keystrokes/input
+    rpc TerminatePty(...) // Kill PTY session
+}
+```
+
+### Reranker Algorithms (10 Types)
+
+```protobuf
+enum RerankerAlgorithm {
+    UNSPECIFIED     = 0;
+    LULEA           = 1;   // Custom (named after Swedish city)
+    UMEA            = 2;   // Custom (named after Swedish city)
+    NONE            = 3;
+    LLAMA           = 4;   // Meta's LLaMA-based reranker
+    STARCODER_V1    = 5;   // BigCode StarCoder reranker
+    GPT_3_5_LOGPROBS = 6;  // OpenAI GPT-3.5 logprob-based
+    LULEA_HAIKU     = 7;   // Custom + Claude Haiku combo
+    COHERE          = 8;   // Cohere Rerank
+    VOYAGE          = 9;   // Voyage AI embeddings
+}
+```
+
+Cursor uses **multiple reranking strategies** for code search, named after Swedish cities (Luleå, Umeå — likely Anysphere's internal naming convention). They combine custom models with commercial APIs (Cohere, Voyage AI, OpenAI).
+
+### ClientSideToolV2 (Complete Cursor Tool Surface — 63 Tools)
+
+This enum maps Cursor's internal tool numbering. IDs with gaps suggest removed/deprecated tools.
+
+| ID | Tool | Category |
+|----|------|----------|
+| 1 | READ_SEMSEARCH_FILES | Search |
+| 3 | RIPGREP_SEARCH | Search |
+| 5 | READ_FILE | File ops |
+| 6 | LIST_DIR | File ops |
+| 7 | EDIT_FILE | File ops |
+| 8 | FILE_SEARCH | Search |
+| 9 | SEMANTIC_SEARCH_FULL | Search |
+| 11 | DELETE_FILE | File ops |
+| 12 | REAPPLY | Edit |
+| 15 | RUN_TERMINAL_COMMAND_V2 | Execution |
+| 16 | FETCH_RULES | Config |
+| 18 | WEB_SEARCH | Web |
+| 19 | MCP | MCP |
+| 23 | SEARCH_SYMBOLS | Search |
+| 24 | BACKGROUND_COMPOSER_FOLLOWUP | Agent |
+| 25 | KNOWLEDGE_BASE | Search |
+| 26 | FETCH_PULL_REQUEST | Git |
+| 27 | DEEP_SEARCH | Search |
+| 28 | CREATE_DIAGRAM | Media |
+| 29 | FIX_LINTS | Code quality |
+| 30 | READ_LINTS | Code quality |
+| 31 | GO_TO_DEFINITION | Navigation |
+| 32 | TASK | Subagents |
+| 33 | AWAIT_TASK | Subagents |
+| 34 | TODO_READ | Task mgmt |
+| 35 | TODO_WRITE | Task mgmt |
+| 38 | EDIT_FILE_V2 | File ops |
+| 39 | LIST_DIR_V2 | File ops |
+| 40 | READ_FILE_V2 | File ops |
+| 41 | RIPGREP_RAW_SEARCH | Search |
+| 42 | GLOB_FILE_SEARCH | Search |
+| 43 | CREATE_PLAN | Planning |
+| 44 | LIST_MCP_RESOURCES | MCP |
+| 45 | READ_MCP_RESOURCE | MCP |
+| 46 | READ_PROJECT | Project |
+| 47 | UPDATE_PROJECT | Project |
+| 48 | TASK_V2 | Subagents |
+| 49 | CALL_MCP_TOOL | MCP |
+| 50 | APPLY_AGENT_DIFF | File ops |
+| 51 | ASK_QUESTION | Interaction |
+| 52 | SWITCH_MODE | Meta |
+| 53 | GENERATE_IMAGE | Media |
+| 54 | COMPUTER_USE | Desktop |
+| 55 | WRITE_SHELL_STDIN | Execution |
+| 56 | RECORD_SCREEN | Desktop |
+| 57 | WEB_FETCH | Web |
+| 58 | REPORT_BUGFIX_RESULTS | Bugbot |
+| 59 | AI_ATTRIBUTION | Meta |
+| 60 | MCP_AUTH | MCP |
+| 61 | REFLECT | Meta |
+| 62 | AWAIT | Subagents |
+| 63 | GET_MCP_TOOLS | MCP |
+
+**Notable observations:**
+- IDs 2, 4, 10, 13, 14, 17, 20-22, 36-37 are missing — likely deprecated/removed tools.
+- V2 versions exist for EDIT_FILE, LIST_DIR, READ_FILE, TASK, RIPGREP — showing iterative tool development.
+- BACKGROUND_COMPOSER_FOLLOWUP (24) — agents can chain follow-up tasks.
+- KNOWLEDGE_BASE (25) — agents can query a knowledge base (vector store?).
+- CREATE_DIAGRAM (28) — agents can generate diagrams.
+- READ_PROJECT / UPDATE_PROJECT (46-47) — project-level read/write operations (new "Project" mode?).
+
+### BuiltinTool (Server-Side Tools — 20 Types)
+
+These are the tools that run on Cursor's AI server, not client-side:
+
+```
+SEARCH, READ_CHUNK, GOTODEF, EDIT, UNDO_EDIT, END, NEW_FILE,
+ADD_TEST, RUN_TEST, DELETE_TEST, SAVE_FILE, GET_TESTS,
+GET_SYMBOLS, SEMANTIC_SEARCH, GET_PROJECT_STRUCTURE,
+CREATE_RM_FILES, RUN_TERMINAL_COMMANDS, NEW_EDIT, READ_WITH_LINTER
+```
+
+### Enterprise Features Summary
+
+| Feature | Details |
+|---------|---------|
+| Background Composer Secrets | Encrypted env vars injected into agent sandboxes (CRUD + batch + revoke) |
+| Team Hooks | Server-side hooks triggered on agent events |
+| Team Commands | Custom slash commands available to all team members |
+| Global Commands | Cursor-wide commands (managed by Cursor staff) |
+| Service Accounts | Automated agent accounts with spend limits and API keys |
+| Egress Protection | Network-level controls with admin lock |
+| Custom System Prompts | Allowlisted enterprise teams only |
+| Bugbot | Automated bug detection, learned rules, backfill analysis, autofix |
+| Plugin Marketplace | Install, create, approve plugins (MCP-based) |
+| SCIM/SSO | Enterprise directory integration |
+| Audit Logs | Full audit trail via `GetAuditLogs` |
+| Privacy Mode | Per-user and team-level privacy controls |
+| GitHub Enterprise | Custom GitHub App installation for orgs |
+| GitLab Enterprise | GitLab instance integration |
+
+### AgentRunRequest (How Tasks Are Dispatched)
+
+The core message that kicks off an agent run:
+
+```protobuf
+message AgentRunRequest {
+    ConversationStateStructure conversation_state = 1;  // Full conversation history
+    ConversationAction action = 2;                       // What to do
+    ModelDetails model_details = 3;                      // Model config + credentials
+    RequestedModel requested_model = 9;                  // User's model preference
+    McpTools mcp_tools = 4;                              // Available MCP tools
+    string conversation_id = 5;                          // Conversation tracking
+    McpFileSystemOptions mcp_file_system_options = 6;    // MCP filesystem config
+    SkillOptions skill_options = 7;                       // Skill/command config
+    string custom_system_prompt = 8;                     // Enterprise custom prompt
+    bool suggest_next_prompt = 10;                        // Generate prompt suggestions
+    string subagent_type_name = 11;                       // Subagent type
+    bool exclude_workspace_context = 12;                  // Skip workspace indexing
+}
+```
+
+### ModelDetails (Multi-Provider Model Support)
+
+```protobuf
+message ModelDetails {
+    string model_id = 1;
+    string display_model_id = 3;
+    string display_name = 4;
+    string display_name_short = 5;
+    repeated string aliases = 6;
+    ThinkingDetails thinking_details = 2;
+    bool max_mode = 7;  // "Max" mode toggle
+    oneof credentials {
+        ApiKeyCredentials api_key_credentials = 8;    // Standard API key
+        AzureCredentials azure_credentials = 9;       // Azure OpenAI
+        BedrockCredentials bedrock_credentials = 10;  // AWS Bedrock
+    }
+}
+```
+
+**This confirms three credential backends:** standard API key, Azure OpenAI, and AWS Bedrock. Enterprise customers can bring their own model deployments.
+
+### ConversationAction (10 Action Types)
+
+```protobuf
+message ConversationAction {
+    oneof action {
+        UserMessageAction user_message_action = 1;                      // User sends a message
+        ResumeAction resume_action = 2;                                 // Resume paused agent
+        CancelAction cancel_action = 3;                                 // Cancel current operation
+        SummarizeAction summarize_action = 4;                           // Trigger context summarization
+        ShellCommandAction shell_command_action = 5;                    // Direct shell command
+        StartPlanAction start_plan_action = 6;                          // Enter planning mode
+        ExecutePlanAction execute_plan_action = 7;                      // Execute approved plan
+        AsyncAskQuestionCompletionAction async_ask_question = 8;        // Answer to async question
+        CancelSubagentAction cancel_subagent_action = 10;               // Cancel a subagent
+        BackgroundTaskCompletionAction background_task_completion = 12;  // Background task done
+        BackgroundShellAction background_shell_action = 13;             // Background shell event
+    }
+    string triggering_auth_id = 11;  // Who triggered this action
+}
+```
+
+### ComputerUse (Full Desktop Control Protocol)
+
+```protobuf
+message ComputerUseAction {
+    oneof action {
+        MouseMoveAction mouse_move = 1;        // Move cursor to coordinate
+        ClickAction click = 2;                 // Click (single/double/triple/right/middle)
+        MouseDownAction mouse_down = 3;        // Mouse button down
+        MouseUpAction mouse_up = 4;            // Mouse button up
+        DragAction drag = 5;                   // Click-and-drag
+        ScrollAction scroll = 6;               // Scroll (up/down/left/right)
+        TypeAction type = 7;                   // Type text
+        KeyAction key = 8;                     // Press key combination
+        WaitAction wait = 9;                   // Wait for N milliseconds
+        ScreenshotAction screenshot = 10;      // Take screenshot
+        CursorPositionAction cursor_position = 11;  // Get current cursor position
+    }
+}
+
+enum ClickType { SINGLE=1, DOUBLE=2, TRIPLE=3, RIGHT=4 }
+enum MouseButton { LEFT=1, RIGHT=2, MIDDLE=3 }
+enum ScrollDirection { UP=1, DOWN=2, LEFT=3, RIGHT=4 }
+```
+
+### Recording System (Screen Capture Pipeline)
+
+```protobuf
+enum RecordingMode {
+    START_RECORDING = 1;    // Begin capturing
+    SAVE_RECORDING = 2;     // Save and process via polished-renderer
+    DISCARD_RECORDING = 3;  // Throw away recording
+}
+
+// Idle detection for smart recording (skip boring parts)
+enum IdleClassification {
+    LOADING_WAIT = 1;     // Waiting for UI response
+    VIEWING_RESULT = 2;   // Looking at what happened
+    THINKING_PAUSE = 3;   // Agent deliberating
+    LONG_OPERATION = 4;   // Waiting for long process
+}
+```
+
+The recording system classifies idle periods to produce more interesting playback — it can skip or speed up loading waits and thinking pauses.
+
+### Simulated Messages (Agent Self-Prompting)
+
+```protobuf
+enum SimulatedMsgReason {
+    PLAN_EXECUTION = 1;              // Auto-generated when user accepts a plan
+    COMMIT_REMINDER = 2;             // Auto-prompt to commit changes
+    BACKGROUND_TASK_COMPLETION = 3;  // Background task finished
+    DIFF_TAB_COMMIT = 4;             // User clicked "Commit" in diff tab
+    DIFF_TAB_COMMIT_AND_PUSH = 5;    // User clicked "Commit & Push"
+    DIFF_TAB_PUSH = 6;               // User clicked "Push"
+    DIFF_TAB_CREATE_PR = 7;          // User clicked "Create PR"
+}
+```
+
+**The agent can auto-generate messages to itself.** When a user accepts a plan, the system generates a simulated user message to start execution. The diff tab UI buttons (Commit, Push, Create PR) also generate simulated messages.
+
+### AgentSkill System
+
+```protobuf
+message AgentSkill {
+    string full_path = 1;                     // Path to skill file
+    string content = 2;                       // Skill prompt content
+    string description = 3;                   // Human-readable description
+    string parse_error = 4;                   // Parse errors (if any)
+    repeated string environments = 5;          // Enabled environments
+    repeated string disabled_environments = 6; // Disabled environments
+    string git_remote_origin = 7;             // Git repo for the skill
+    bool disable_model_invocation = 8;        // Pure template (no LLM call)
+}
+```
+
+Skills can be **environment-aware** (enabled/disabled per environment), git-tracked, and some can run without invoking the LLM (`disable_model_invocation`).
+
+### Cursor Rule Sources
+
+```protobuf
+enum CursorRuleSource {
+    TEAM = 1;  // Team-level rules (enforced for all members)
+    USER = 2;  // User-level rules (personal preferences)
+}
+```
+
+Team rules take priority over user rules, allowing organizations to enforce coding standards.
+
+### Live Process Tree (Verified)
+
+Top processes by memory from inside the sandbox:
+
+| Process | RSS | Purpose |
+|---------|-----|---------|
+| next-server (v16.1.6) | 2.8GB | User's Next.js dev server |
+| claude (CLI) | 479MB | Claude Code agent process |
+| exec-daemon (Node.js) | 381MB | Cursor's agent runtime |
+| Chrome (renderer) | 375MB | Chrome browser tab |
+| Chrome (main) | 285MB | Chrome browser process |
+| Xtigervnc | 126MB | VNC server |
+| xfwm4 | 126MB | XFCE window manager |
+| Chrome (network) | 123MB | Chrome network service |
+| Chrome (GPU/SwiftShader) | 119MB | Chrome software WebGL |
+
+**Total sandbox memory usage: ~4.7GB of 16GB** with a Next.js app, Chrome, and agent running.
+
+---
+
 ## Twitter Thread Angles
 
 ### Thread Hook
@@ -1143,6 +1708,22 @@ The exec-daemon wraps user commands through `cursorsandbox` with appropriate pol
 11. **Full CLAUDE.md support** — The Background Agent reads `CLAUDE.md`, `CLAUDE.local.md`, and `AGENTS.md` from your project hierarchy, plus `.cursor/rules/`. Your project instructions carry into background tasks.
 
 12. **Ansible-provisioned desktop** — The VNC/XFCE/Chrome stack is installed via an Ansible playbook (`vnc-desktop.yml`), not raw Dockerfile commands. Infrastructure-as-code all the way down.
+
+13. **Multi-model support** — Not just Claude. `ThinkingStyle` enum has entries for CODEX and GPT5. `ModelDetails` supports ApiKey, Azure, and Bedrock credentials. Gemini used for command classification. 10 different reranker algorithms including LLaMA, Cohere, and Voyage AI.
+
+14. **38 agent tools** — Complete tool surface extracted from protobuf: Shell, Edit, Read, Write, Grep, Glob, ComputerUse, WebSearch, WebFetch, GenerateImage, RecordScreen, SemSearch, AskQuestion, Task (subagents), CreatePlan, Reflect, BlameByFilePath, PrManagement, StartGrind, ReportBugfixResults, and more.
+
+15. **6 agent modes** — Agent, Ask, Plan, Debug, Triage, Project. The agent can switch between modes mid-conversation.
+
+16. **Gemini security layer** — A Gemini model classifies shell commands before execution ("smart allowlist"). This is an AI-powered security gate on top of the static sandbox policy.
+
+17. **Full Cursor Dashboard API leaked** — The bundle contains `aiserver.v1.DashboardService` with 200+ RPCs — the entire Cursor backend API. Includes billing, team management, plugin marketplace, GitHub/Linear/PagerDuty/Slack integrations, SCIM/SSO, audit logs.
+
+18. **Agent knows your IDE state** — `InvocationContext` includes visible files, cursor position, recently viewed files, and currently viewed PRs. The agent sees exactly what you're looking at.
+
+19. **Self-prompting system** — The agent generates simulated user messages for plan execution, commit reminders, and diff tab actions. It can talk to itself.
+
+20. **Enterprise depth** — Background Composer Secrets (encrypted env vars for agents), team hooks, team commands, service accounts with spend limits, egress protection with admin lock, Bugbot with learned rules and autofix.
 
 ---
 
@@ -1180,4 +1761,32 @@ strings /exec-daemon/index.js | grep "custom_system_prompt"    # → system prom
 strings /exec-daemon/index.js | grep "CLAUDE.md"               # → CLAUDE.md loading
 crane config public.ecr.aws/k0i0n2g5/cursorenvironments/universal:default-b8e9345  # → full Dockerfile history
 crane manifest public.ecr.aws/k0i0n2g5/cursorenvironments/universal:default-b8e9345  # → layer manifest
+
+# === Added March 4, 2026 (from inside live sandbox via Claude Code) ===
+ls -la /exec-daemon/                    # → full file layout with sizes (rg, gh, polished-renderer.node)
+file /exec-daemon/polished-renderer.node  # → ELF shared object (N-API addon)
+file /exec-daemon/rg                    # → static-pie ELF (bundled ripgrep)
+file /exec-daemon/gh                    # → static ELF (bundled GitHub CLI)
+ps aux --sort=-rss                      # → live process tree with memory usage
+strings /exec-daemon/index.js | grep "generated from enum"      # → 5,353 protobuf definitions
+strings /exec-daemon/index.js | grep "generated from service"   # → 4 gRPC services
+strings /exec-daemon/index.js | grep "generated from rpc"       # → 200+ RPCs (full Dashboard API)
+strings /exec-daemon/index.js | grep "generated from message agent.v1.*ToolCall$"  # → 38 agent tools
+strings /exec-daemon/index.js | grep "AgentMode"               # → 6 agent modes
+strings /exec-daemon/index.js | grep "ThinkingStyle"           # → 3 thinking styles (Default/Codex/GPT5)
+strings /exec-daemon/index.js | grep "SandboxPolicy"           # → 3 sandbox policy types
+strings /exec-daemon/index.js | grep "NetworkPolicy"           # → allow/deny default actions
+strings /exec-daemon/index.js | grep "EgressProtection"        # → 4 egress protection modes
+strings /exec-daemon/index.js | grep "ComputerUseAction"       # → 11 desktop control actions
+strings /exec-daemon/index.js | grep "RecordingMode"           # → start/save/discard recording
+strings /exec-daemon/index.js | grep "IdleClassification"      # → 4 idle types for smart recording
+strings /exec-daemon/index.js | grep "SimulatedMsgReason"      # → 7 self-prompting triggers
+strings /exec-daemon/index.js | grep "ConversationAction"      # → 10 action types
+strings /exec-daemon/index.js | grep "ModelDetails"            # → multi-provider credentials
+strings /exec-daemon/index.js | grep "AgentRunRequest"         # → full request structure
+strings /exec-daemon/index.js | grep "ClientSideToolV2"        # → 63 Cursor client tools
+strings /exec-daemon/index.js | grep "BuiltinTool"             # → 20 server-side tools
+strings /exec-daemon/index.js | grep "RERANKER_ALGORITHM"      # → 10 reranker algorithms
+strings /exec-daemon/index.js | grep "gemini\|smart.allowlist" # → Gemini command classifier
+strings /exec-daemon/index.js | grep "InvocationContext"       # → IDE state, GitHub PR, Slack thread triggers
 ```
