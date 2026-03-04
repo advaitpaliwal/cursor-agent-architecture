@@ -2540,4 +2540,92 @@ curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cu
 # helper system when Claude Code starts. The sk-ant-oat01-* OAuth tokens
 # are the user's Anthropic auth, ghs_* is their GitHub installation token.
 # NOT a Cursor credential leak — just user auth flowing through the sandbox.
+
+# === Added March 4, 2026 — Wave 6 (ECR deep dive, image variants, Docker host) ===
+
+## Three Distinct Image Variants (from ECR layer analysis)
+
+### 1. default-* (Our current image, 2.18GB compressed, 23 layers, 44 build steps)
+# Full dev environment: Ubuntu 24.04, VNC/XFCE4 desktop, Docker-in-Docker
+# Languages: Python 3, Go 1.22, Rust 1.83, Node 22, Java (default-jdk)
+# Tools: gcc, clang, cmake, vim, emacs, nano, htop, git-lfs, oathtool
+# Desktop: TigerVNC + XFCE4 + WhiteSur theme + Plank dock + noVNC
+# Chrome 145 with CDP, Playwright profile, polished-renderer for video
+# Entrypoint: /usr/local/share/desktop-init.sh
+# Ports: 26058 (noVNC), 5901 (VNC)
+
+### 2. browser-use-* (696MB compressed, 10 layers, 23 build steps)
+# Lightweight headless browser automation environment
+# Ubuntu 24.04 MINIMAL — NO desktop, NO VNC, NO Go, NO Rust, NO Java
+# Only: Node 22, Playwright Chromium (version 1148), basic apt deps
+# Playwright at: ~/.cache/ms-playwright/chromium-1148/chrome-linux/chrome
+# Entrypoint: bash (just a shell — exec-daemon spawns Playwright directly)
+# WorkingDir: / (root, not /home/ubuntu)
+# NO display, NO VNC ports exposed
+# Key difference: Designed for headless browser automation only
+
+### 3. computer-use-* (815MB compressed, 13 layers, 22 build steps)
+# Desktop automation via supervisord
+# Ubuntu 22.04 (NOT 24.04!) — older base image
+# Xvfb virtual framebuffer at :99 (not TigerVNC)
+# x11vnc on port 5900, websockify on port 6080
+# Playwright Chromium (version 1194 — NEWER than browser-use's 1148)
+# User: chrome (NOT ubuntu) with VNC password "chrome"
+# Entrypoint: /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
+# 4 supervised processes: xvfb (1920x1080x24), x11vnc, websockify, chrome
+# Chrome flags: --no-sandbox --disable-dev-shm-usage --disable-gpu --start-maximized
+# Chromium path cached at: /usr/local/bin/chromium-path.txt
+# Points to: /root/.cache/ms-playwright/chromium-1194/chrome-linux/chrome
+
+## Computer-Use supervisord.conf (extracted from ECR layer):
+# [supervisord] nodaemon=true
+# [program:xvfb]      priority=100, Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX
+# [program:x11vnc]     priority=200, start-x11vnc.sh (waits for X socket + xdpyinfo)
+# [program:websockify]  priority=300, websockify 6080 localhost:5900
+# [program:chrome]     priority=400, start-chrome.sh (reads chromium-path.txt, starts maximized)
+
+## Computer-Use start-chrome.sh (extracted from ECR layer):
+# Waits for X server via /tmp/.X11-unix/X99 socket
+# Reads cached chromium path from /usr/local/bin/chromium-path.txt
+# Falls back to find search if cache miss
+# Chrome flags: --no-sandbox --disable-dev-shm-usage --disable-gpu
+#   --disable-software-rasterizer --no-first-run --no-default-browser-check
+#   --disable-background-networking --disable-sync --disable-translate
+#   --disable-extensions --start-maximized --window-size=1920,1080
+#   --log-level=3 --test-type "https://www.google.com"
+
+## Docker Host Details (from Docker API at localhost:2375):
+# Docker Version: 29.1.4
+# Host OS: Debian GNU/Linux 12 (bookworm)
+# Kernel: 6.1.147
+# CPUs: 4, Memory: 15 GB
+# Storage: overlay2
+# Cgroup Version: 1
+# Security: seccomp with builtin profile
+# Docker Root: /var/lib/docker
+# Host name: d45f01ad4149 (Docker-in-Docker host)
+# Containers: 1 (just our sandbox)
+# Images: 1 (just our image)
+# Image size on disk: 7,313 MB (uncompressed)
+
+## Pod-daemon Process Details (from /proc/1/status):
+# Binary: /pod-daemon (Rust, statically linked)
+# PID: 1, UID: 0 (root), GID: 0
+# VmPeak: 14,940 kB, VmRSS: 4,436 kB (tiny footprint!)
+# Threads: 5 (tokio async runtime)
+# Capabilities: CapPrm/Eff/Bnd = 000001ffffffffff (ALL caps)
+# Seccomp: 0 (disabled), NoNewPrivs: 0
+# Signal handling: SigCgt=0x4442 (SIGHUP, SIGUSR1, SIGCHLD, SIGRTMIN)
+
+## ECR Registry Access Summary:
+# Registry: public.ecr.aws/k0i0n2g5/cursorenvironments/universal
+# Listing: Tags list is PUBLIC (returns all 1000 tags with auth token)
+# Pull: All blobs are PUBLIC (manifests, configs, layers all downloadable)
+# Catalog: /v2/_catalog returns 404 (no cross-repo enumeration)
+# Other repos: Tested 5 alternate paths, all 404 — single repo only
+# Token endpoint: public.ecr.aws/token (standard ECR public auth)
+# Total tags: 1,000 (268 default, 251 browser-use, 51 computer-use, 430 bare)
+# Tag format: {variant}-{7char-sha} matching everysphere monorepo commits
+# All layers downloadable: manifests, configs, tar.gz layers all accessible
+# Can reconstruct any image variant by downloading all layers
 ```
