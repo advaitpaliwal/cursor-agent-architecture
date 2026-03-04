@@ -1955,6 +1955,146 @@ Top processes by memory from inside the sandbox:
 
 ---
 
+## Container Runtime Details (Live Inspection)
+
+### Resource Limits (from cgroups v1)
+
+| Resource | Limit | Actual |
+|----------|-------|--------|
+| **Memory** | 16 GB (17,179,869,184 bytes) | ~8.6 GB used |
+| **CPU** | 4 cores (400000/100000 us quota) | 4 vCPUs |
+| **PIDs** | Unlimited | ~80 processes |
+| **Open files** | 1024 soft / 524288 hard | — |
+| **Stack** | 8 MB soft / unlimited hard | — |
+
+### Container Configuration (from Docker API inspect)
+
+```json
+{
+  "Entrypoint": ["/pod-daemon"],
+  "User": "root",
+  "NetworkMode": "host",
+  "Privileged": true,
+  "SecurityOpt": ["label=disable"],
+  "IpcMode": "private",
+  "Env": [
+    "GIT_LFS_SKIP_SMUDGE=1",
+    "DISPLAY=:1",
+    "VNC_RESOLUTION=1920x1200x24",
+    "VNC_DPI=96"
+  ]
+}
+```
+
+**Key observations:**
+- `GIT_LFS_SKIP_SMUDGE=1` — LFS files are NOT downloaded when cloning repos (saves bandwidth/time)
+- Container runs as **root** (pod-daemon is PID 1 as root, drops to `ubuntu` for exec-daemon and user processes)
+- Full capabilities: `CapPrm: 000001ffffffffff` (all 41 Linux capabilities)
+- Seccomp: disabled at host level (0 filters) — cursorsandbox applies its own per-command
+- No volumes mounted — workspace is on overlay filesystem
+
+### Host VM Details
+
+| Property | Value |
+|----------|-------|
+| Hostname (container) | `cursor` |
+| Host DNS name | `ip-172-30-0-2.ec2.internal` |
+| Gateway | `ip-172-30-0-1.ec2.internal` |
+| Kernel | 6.1.147, built on `ip-10-0-0-10` (Ubuntu 22.04 build host) |
+| Container IP | 172.30.0.2/24 (Docker bridge from host) |
+| Docker-in-Docker bridge | 172.17.0.1 |
+| Root disk | `/dev/vda` (126 GB ext4, 14 GB used) |
+| Cgroups | v1 (not v2) |
+
+### DNS Resolution (Cursor Infrastructure)
+
+| Domain | Resolution |
+|--------|-----------|
+| `api2.cursor.sh` | → `api2geo.cursor.sh` → `api2direct.cursor.sh` → 8 AWS IPs (us-east-1, load balanced) |
+| `cursor.sh` / `cursor.com` | → 76.76.21.21 (Vercel) |
+| `authentication.cursor.sh` | Not resolvable from public DNS (internal only) |
+| `cursorvm-manager.com` | Not resolvable from public DNS (internal only) |
+| `cursorvm.com` | Not resolvable from public DNS (internal only) |
+
+### /opt/cursor/ Directory Structure
+
+```
+/opt/cursor/
+├── ansible/                    # Ansible playbook + files (preserved from build)
+│   ├── vnc-desktop.yml        # 37KB playbook (1023 lines)
+│   ├── README.md              # Playbook docs
+│   └── files/                 # Desktop assets
+│       ├── anyos.conf         # Display config (1920x1200, 96 DPI, 120fps)
+│       ├── anyos.hidpi.conf   # 4K/HiDPI variant
+│       ├── anyos-setup.sh     # Config template processor
+│       ├── desktop-init.sh    # 12KB init script (the real one)
+│       ├── set-resolution.sh  # Runtime resolution changer
+│       ├── cursor-logo*.svg/png  # Cursor branding
+│       ├── fonts/             # macOS system fonts (SF Pro, SF Mono, etc.)
+│       ├── polished-renderer/ # Rust source code for video renderer
+│       ├── xfce-config/       # XFCE4 configuration templates
+│       └── install-hidpi-assets.sh
+├── artifacts/                  # Agent output artifacts (777 permissions)
+├── logs/                       # Agent logs (777 permissions)
+├── recording-staging/          # Screen recording staging area (777 permissions)
+├── .exec-daemon/              # Exec-daemon staging directory (sticky bit)
+└── polished-renderer/         # Standalone renderer binary (6MB)
+    └── polished-renderer      # Built from Rust source during Docker image build
+```
+
+**Key finding:** The Ansible `files/polished-renderer/` directory contains the **full Rust source code** for the polished-renderer, which is compiled during the Docker image build. This means the source is available in the public ECR image.
+
+### Desktop Configuration (anyos.conf)
+
+```ini
+ANYOS_DISPLAY_WIDTH=1920
+ANYOS_DISPLAY_HEIGHT=1200
+ANYOS_DISPLAY_DEPTH=24
+ANYOS_DPI=96
+ANYOS_FRAMERATE=120
+ANYOS_GDK_SCALE=1
+ANYOS_GDK_DPI_SCALE=1
+ANYOS_QT_SCALE_FACTOR=1
+ANYOS_PANEL_HEIGHT=28
+ANYOS_CURSOR_SIZE=24
+ANYOS_DOCK_ICON_SIZE=48
+ANYOS_FONT_NAME=".SF NS"
+ANYOS_FONT_SIZE=11
+ANYOS_TERMINAL_FONT_NAME=".SF NS Mono"
+ANYOS_TERMINAL_FONT_SIZE=11
+```
+
+### Desktop Wallpaper
+
+Hosted on **Vercel Blob Storage**:
+```
+https://ptht05hbb1ssoooe.public.blob.vercel-storage.com/assets/misc/asset-cc24ca462279ca23250c.jpg
+```
+
+### Ansible Playbook Highlights (vnc-desktop.yml)
+
+The 1023-line playbook reveals:
+1. **polished-renderer is compiled from source** during image build (Rust 1.83.0, FFmpeg dev libs)
+2. **Separate Playwright Chrome profile** at `~/.config/google-chrome-playwright/` for CDP automation
+3. **WhiteSur theme** installed from GitHub (GTK theme, icon theme, cursor theme — all from vinceliuice repos)
+4. **Font substitution rules** cover: Arial→Arimo, Helvetica→Liberation Sans, Times New Roman→Tinos, Courier New→Cousine, Gill Sans→Cantarell, Menlo/Monaco→JetBrains Mono, system-ui/-apple-system/BlinkMacSystemFont/Segoe UI/Roboto→Noto Sans
+5. **Mesa software rendering** packages for WebGL: libgl1-mesa-dri, libglx-mesa0, libgl1
+6. **Development libraries** for native addons: libx11-dev, libxkbfile-dev, libsecret-1-dev, libgbm-dev
+7. **Cursor logo branding**: SVG + PNG in light and dark variants
+8. **Light/dark mode support**: `ANYOS_DESKTOP_APPEARANCE` env var switches panel and GTK CSS
+9. **Desktop wallpaper**: Downloaded from Vercel Blob Storage at build time
+10. **`/usr/local/etc/vscode-dev-containers/`** directory created — compatibility with VS Code dev containers
+
+### Port 50052 Identification
+
+Both ports 26500 and 50052 respond with HTTP/2 SETTINGS frames (gRPC):
+```
+SETTINGS: INITIAL_WINDOW_SIZE=1048576, MAX_FRAME_SIZE=16384, MAX_HEADER_LIST_SIZE=16384
+```
+Port 50052 is a **second gRPC endpoint** — likely the exec-daemon's internal control API (separate from the user-facing port 26053).
+
+---
+
 ## Evidence Sources
 
 All findings from running commands inside a live Cursor Background Agent container:
@@ -2017,6 +2157,26 @@ strings /exec-daemon/index.js | grep "BuiltinTool"             # → 20 server-s
 strings /exec-daemon/index.js | grep "RERANKER_ALGORITHM"      # → 10 reranker algorithms
 strings /exec-daemon/index.js | grep "gemini\|smart.allowlist" # → Gemini command classifier
 strings /exec-daemon/index.js | grep "InvocationContext"       # → IDE state, GitHub PR, Slack thread triggers
+
+# === Added March 4, 2026 — Wave 3 (container runtime, host details, Ansible) ===
+curl -s http://localhost:2375/containers/pod-kyaoya54prfyzkhl4qagqnuf34-b8e29869/json  # → Full container inspect
+cat /sys/fs/cgroup/memory/memory.limit_in_bytes  # → 17179869184 (16 GB)
+cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us           # → 400000 (4 cores)
+cat /proc/1/status | grep Cap                     # → CapPrm: 000001ffffffffff (all capabilities)
+cat /proc/1/cgroup                                # → docker/9ff6c4253fb5... (container ID)
+ifconfig                                          # → eth0: 172.30.0.2, docker0: 172.17.0.1
+dig +short -x 172.30.0.2                          # → ip-172-30-0-2.ec2.internal
+dig +short api2.cursor.sh                         # → api2geo.cursor.sh → 8 AWS IPs
+mount                                             # → overlay fs with 24 layers
+ls -laR /opt/cursor/                              # → ansible/, artifacts/, logs/, recording-staging/
+cat /opt/cursor/ansible/files/anyos.conf          # → Full desktop config (1920x1200, 120fps, SF NS fonts)
+cat /opt/cursor/ansible/files/desktop-init.sh     # → 12KB real init script (parallel startup, debug helpers)
+cat /opt/cursor/ansible/vnc-desktop.yml           # → 1023-line Ansible playbook (full desktop provisioning)
+curl -sI exec-daemon S3 URL                       # → 70MB tarball, AES256 encrypted, Last-Modified March 4
+dmesg                                             # → overlayfs warnings, KVM idle traces
+strings /exec-daemon/index.js | grep "cursorvm-manager"  # → 17 cluster URLs (dev, eval, train, us1-us6)
+strings /exec-daemon/index.js | grep "anysphere"         # → @anysphere/* internal packages
+python3 -c "gRPC HTTP/2 probe on port 50052"     # → SETTINGS frame (confirms gRPC)
 
 # === Added March 4, 2026 — Wave 2 (cursorsandbox deep dive, security, infrastructure) ===
 strings /exec-daemon/cursorsandbox | grep -i "sandbox:"        # → 7-step sandbox init process
