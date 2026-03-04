@@ -86,11 +86,23 @@ Cursor's Background Agent runs user tasks in isolated cloud sandboxes. Each task
 
 | Property | Value |
 |----------|-------|
-| Binary | `/pod-daemon` |
-| Type | Statically compiled (Go or Rust) |
+| Binary | `/pod-daemon` (7,888,568 bytes) |
+| Type | **Rust** (static-pie ELF, stripped). Built with tonic-0.13.1, rustls-0.23.35, hyper-1.8.1, matchit-0.8.4, aws-lc crypto |
 | PID | 1 (container entrypoint) |
-| Role | Container init / lifecycle manager |
-| Port | Likely 50052 (gRPC) |
+| Role | Container init / lifecycle manager / gRPC process manager |
+| Port | **26500** (0.0.0.0, gRPC via tonic) |
+
+**Configuration schema** (from binary strings):
+
+| Config Key | Default | Purpose |
+|-----------|---------|---------|
+| `listen_addr` | `0.0.0.0:26500` | gRPC listen address |
+| `max_processes` | 1000 | Maximum managed processes |
+| `stream_buffer_size` | 8192 | Event stream buffer |
+| `max_events_per_process` | 10000 | Event history limit |
+| `log_level` | `info` | Log verbosity |
+
+**gRPC capabilities**: spawn processes, attach to running processes, stream events, kill/signal processes. Uses cgroup `cpu.cfs_quota_us` for CPU limiting.
 
 **Responsibilities:**
 
@@ -599,48 +611,37 @@ else
 fi
 ```
 
-### Step 6: Pod Daemon (Simplified Go)
+### Step 6: Pod Daemon (Simplified Rust)
 
-```go
-package main
+> **Correction (March 4, 2026):** Pod-daemon is written in **Rust**, not Go. Binary analysis reveals tonic gRPC, rustls TLS, aws-lc crypto, and Rust-specific debug symbols.
 
-import (
-	"log"
-	"os"
-	"os/exec"
-	"os/signal"
-	"syscall"
-)
+```rust
+// Simplified conceptual equivalent — real binary is ~7.8MB stripped Rust
+use tonic::transport::Server;
 
-func main() {
-	log.Println("[pod-daemon] Starting...")
+#[tokio::main]
+async fn main() {
+    // Listen on 0.0.0.0:26500 for gRPC
+    let addr = "0.0.0.0:26500".parse().unwrap();
 
-	// Start desktop environment
-	desktop := exec.Command("/usr/local/share/desktop-init.sh")
-	desktop.Stdout = os.Stdout
-	desktop.Stderr = os.Stderr
-	go func() {
-		if err := desktop.Run(); err != nil {
-			log.Printf("[pod-daemon] Desktop exited: %v", err)
-		}
-	}()
+    // Start desktop environment
+    tokio::spawn(async {
+        Command::new("/usr/local/share/desktop-init.sh")
+            .spawn().unwrap().wait().await.unwrap();
+    });
 
-	// Start exec daemon
-	agent := exec.Command("/exec-daemon/node", "/exec-daemon/index.js")
-	agent.Stdout = os.Stdout
-	agent.Stderr = os.Stderr
-	agent.Dir = "/workspace"
-	go func() {
-		if err := agent.Run(); err != nil {
-			log.Printf("[pod-daemon] Exec daemon exited: %v", err)
-		}
-	}()
+    // Start exec daemon
+    tokio::spawn(async {
+        Command::new("/exec-daemon/node")
+            .arg("/exec-daemon/index.js")
+            .current_dir("/workspace")
+            .spawn().unwrap().wait().await.unwrap();
+    });
 
-	// Handle shutdown
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
-	<-sig
-	log.Println("[pod-daemon] Shutting down...")
+    // Process manager: spawn, attach, stream events, kill/signal
+    Server::builder()
+        .add_service(ProcessManagerService::new(config))
+        .serve(addr).await.unwrap();
 }
 ```
 
@@ -1110,6 +1111,233 @@ The exec-daemon wraps user commands through `cursorsandbox` with appropriate pol
 - Fail-closed by default (`--policy-strict` defaults to true)
 - Preflight mode for checking sandbox support before execution
 - Policies are passed as JSON (either inline or via file)
+
+### Cursorsandbox Deep Dive: 7-Step Sandbox Initialization
+
+Binary analysis of `/exec-daemon/cursorsandbox` reveals a **7-step sandboxing process** that wraps every command execution:
+
+```
+Step 1-2/7: User namespace creation (setgroups deny mode, network_isolated flag)
+Step 2.5/7: Loopback interface setup
+Step 3/7:   Remount MS_PRIVATE (prevent mount propagation)
+Step 5.5/7: Seccomp BPF — block dangerous syscalls
+Step 6/7:   Seccomp BPF — block network syscalls
+Step 6.5/7: Drop capabilities (CAP_DAC_OVERRIDE from bounding set)
+Step 7/7:   Change to working directory
+```
+
+**Security layers (from binary strings):**
+
+| Layer | Technology | Details |
+|-------|-----------|---------|
+| **Landlock LSM** | Linux 5.13+ | Filesystem write restrictions. `CURSOR_SANDBOX_LANDLOCK_STATUS=fully_enforced`. Calls `restrict_self()` to enforce rules. ABI version checking for compatibility. |
+| **Seccomp BPF** | Linux kernel | Two-phase: dangerous syscall block + network syscall block. Filter instruction count is validated. Thread synchronization enforced. |
+| **User namespaces** | Linux kernel | Process isolation with setgroups deny mode. Network isolation flag. |
+| **Capability dropping** | Linux kernel | Drops `CAP_DAC_OVERRIDE` from bounding set (prevents bypassing file permissions). |
+| **Blackhole mechanism** | Filesystem | Creates blackhole directories with 000 permissions, then mounts read-only. Used to block access to sensitive paths like `.ssh`, `.git/config`. |
+| **Network proxy** | HTTP CONNECT | Sets `HTTP_PROXY=http://127.0.0.1:<port>`. All outbound connections go through a local proxy that enforces domain allowlist/denylist. |
+
+**Network policy enforcement:**
+
+```
+Decision log fields: timestamp, session_id, url, host_hash, resolved_ips, matched_rule, matched_rule_hash
+Policy results: "denied by policy", "deny list", "not on allow list", "allowed by default", "policy invalid"
+Protocols: HTTP CONNECT proxy with session tracking
+Domain matching: Wildcard patterns (e.g., "://*.")
+```
+
+**Filesystem patterns monitored:**
+- `**/*.code-workspace` — VS Code workspace files
+- `.cursorignore` — Cursor's ignore file
+- `**/.git/config` — Git configuration
+- `config.worktree`, `attributes` — Git worktree config
+- `/etc/ssl/cert.pem`, `/etc/ssl/certs/ca-certificates.crt` — SSL certificates (allowed read)
+- `/dev/null`, `/dev/zero`, `/dev/random` — Standard devices (allowed)
+
+**Error handling hierarchy:**
+```
+CRITICAL: Failed to make blackhole mount read-only → sandbox refuses to execute
+WARNING: Failed to write /proc/self/setgroups → continues with degraded isolation
+INFO: Landlock ruleset fully enforced → normal operation
+```
+
+---
+
+## Multi-Region Infrastructure (cursorvm-manager.com)
+
+The exec-daemon bundle reveals Cursor's **complete multi-region sandbox deployment** via hardcoded VM manager URLs:
+
+| Cluster | Manager URL | Purpose |
+|---------|------------|---------|
+| `dev` | `https://dev.cursorvm-manager.com` | Development environment |
+| `eval1` | `https://eval1.cursorvm-manager.com` | Evaluation cluster 1 |
+| `eval2` | `https://eval2.cursorvm-manager.com` | Evaluation cluster 2 |
+| `test1` | `https://test1.cursorvm-manager.com` | Test cluster |
+| `train1`-`train5` | `https://train[1-5].cursorvm-manager.com` | **5 training clusters** (model training/fine-tuning infra) |
+| `us1` | `https://us1.cursorvm-manager.com` | US production cluster 1 |
+| `us1p` | `https://us1p.cursorvm-manager.com` | US1 preview/staging |
+| `us3`-`us6` | `https://us[3-6].cursorvm-manager.com` | US production clusters 3-6 |
+| `us3p`-`us6p` | `https://us[3-6]p.cursorvm-manager.com` | US3-6 preview/staging |
+
+**VNC WebSocket origins** (for live streaming):
+```
+wss://*.dev.cursorvm.com
+wss://*.us1.cursorvm.com / wss://*.us1p.cursorvm.com
+wss://*.us3.cursorvm.com through wss://*.us6.cursorvm.com
+wss://*.us3p.cursorvm.com through wss://*.us6p.cursorvm.com
+```
+
+**Key observations:**
+- **No us2 cluster** — either decommissioned or reserved
+- **5 training clusters** (`train1`-`train5`) — significant investment in model training/evaluation infrastructure
+- **Preview clusters** (suffix `p`) for every production region — blue/green or canary deployment
+- `cursorvm-manager.com` is the orchestration API; `cursorvm.com` handles WebSocket connections
+- All clusters have VNC WebSocket origins, confirming live screen streaming in every region
+
+### Internal Package Names (@anysphere/*)
+
+The exec-daemon webpack bundle imports from these internal Anysphere packages:
+
+| Package | Purpose |
+|---------|---------|
+| `@anysphere/exec-daemon-runtime` | The exec-daemon itself |
+| `@anysphere/shell-exec` | Shell execution with sandboxing (`configureSandboxPrereqs`, `configureRipgrepPath`) |
+| `@anysphere/context` | Distributed context propagation (`createContext`, `createLogger`, `createKey`) |
+| `@anysphere/context-rpc` | Context extraction/propagation over gRPC |
+| `@anysphere/polished-renderer` | Screen recording renderer (N-API addon) |
+| `@anysphere/agent-cli` | Agent CLI framework (tracing adapter) |
+| `@anysphere/git-core` | Git operations |
+| `@anysphere/constants` | Cluster config, `anyrunClusterOrdering`, `docsSite.publishPublicIps` |
+
+**Monorepo name:** `github.com/anysphere/everysphere` (referenced in PR URL patterns: `e.g. https://github.com/anysphere/everysphere/pull/XXXX`)
+
+**Environment variables set by shell-exec:**
+- `EVERYSPHERE_RIPGREP_PATH` — Path to bundled ripgrep (set for both readonly and readwrite modes)
+
+---
+
+## Security Analysis (Live Sandbox — March 4, 2026)
+
+### Credential Exposure
+
+| Credential | Location | Risk |
+|-----------|----------|------|
+| **Exec-daemon auth token** | Process table (`ps aux`) | 256-bit hex token visible to any process in container. Used for `--auth-token` flag. |
+| **Trace JWT** | Process table (`ps aux`) | Full JWT with user ID, expiry, scopes visible in plaintext. Claims: `sub: "google-oauth2\|user_*"`, `type: "exec_daemon"`, `iss: "https://authentication.cursor.sh"`, `aud: "https://cursor.com"` |
+| **Claude Code OAuth** | `/home/ubuntu/.claude/.credentials.json` | Access token (`sk-ant-oat01-*`), refresh token (`sk-ant-ort01-*`). `subscriptionType: "max"`, `rateLimitTier: "default_claude_max_20x"`. Scopes: `user:inference`, `user:mcp_servers`, `user:profile`, `user:sessions:claude_code` |
+| **GitHub installation token** | `/home/ubuntu/.config/gh/hosts.yml` | Token `ghs_*` (installation token, auto-rotated). User: `cursor`. Scoped to the user's installed GitHub App. |
+| **Git credential helper** | `/home/ubuntu/.gitconfig` | `url.https://x-access-token:<token>@github.com/.insteadOf https://github.com/` — token injected into ALL github.com URLs |
+
+### Container Security Posture
+
+| Property | Value | Assessment |
+|----------|-------|------------|
+| **Privileged mode** | `--privileged` | Full host kernel access, all capabilities |
+| **Network mode** | `host` | No network namespace isolation |
+| **Security labels** | `label=disable` | AppArmor/SELinux disabled |
+| **Seccomp** | `Seccomp: 0` (in `/proc/self/status`) | No host-level seccomp profile (cursorsandbox applies its own per-command) |
+| **Docker API** | Port 2375, unauthenticated | Any process can create/destroy containers |
+| **AWS metadata** | `169.254.169.254` blocked (connection timeout) | Good — prevents SSRF to instance metadata |
+
+### Network Topology
+
+```
+Container IP: 172.30.0.2 (Docker bridge)
+DNS: 10.0.0.2 (AWS VPC resolver)
+Host: ip-192-168-24-21.ec2.internal (EC2 private DNS)
+
+Active connections:
+  → api2.cursor.sh (3.232.136.45) — Cursor API + telemetry
+  → Cloudflare (104.16.4.34) — CDN/proxy
+  → Google (34.149.66.137, 142.251.167.188) — Chrome services
+  → cursor.sh / cursor.com → 76.76.21.21 (Vercel)
+
+Cursor API infrastructure:
+  → api2.cursor.sh → 3.232.136.45 (AWS)
+  → authentication.cursor.sh (JWT issuer)
+  → cursorvm-manager.com (VM orchestration)
+  → cursorvm.com (VNC WebSocket streaming)
+```
+
+### S3 Bucket Access
+
+| Bucket | URL | Access |
+|--------|-----|--------|
+| `public-asphr-vm-daemon-bucket` | `s3.us-east-1.amazonaws.com` | **Listing: DENIED**. Individual objects: **PUBLIC** by hash. Contains exec-daemon tarballs (~70MB each). Hash-based URLs prevent enumeration but allow direct download if hash is known. |
+
+### Security Architecture Summary
+
+The sandbox uses a **defense-in-depth** approach with some notable gaps:
+
+**Strong:**
+- AWS metadata service blocked (prevents SSRF)
+- Cursorsandbox applies per-command Landlock + seccomp + capability dropping
+- Network proxy with domain allowlist/denylist + decision logging
+- Secret redaction enabled (`--secret-redaction-enabled`)
+- Hash-based S3 URLs prevent exec-daemon enumeration
+
+**Weak:**
+- Credentials in plaintext in process table (any process can read `ps aux`)
+- Claude Code OAuth tokens stored in readable files (user-level, not root)
+- GitHub token injected into global git config (all git operations use it)
+- Docker API on 2375 with zero authentication
+- Container runs privileged with host network (relies entirely on cursorsandbox for isolation)
+- Ports 26500, 50052 listen on 0.0.0.0 (reachable from host network)
+
+---
+
+## polished-renderer Deep Dive (N-API Video Engine)
+
+The polished-renderer (`/exec-daemon/polished-renderer.node`, 5.8MB) is a **Rust N-API addon** loaded directly by the exec-daemon Node.js process. Binary analysis reveals:
+
+**Video pipeline:**
+```
+Input: Session directory with screen recording frames
+  → FFmpeg decode (libavcodec 60, libavformat 60, libavutil 58)
+  → I420 YUV420p frame processing (CPU compositor)
+  → Effects pipeline (motion blur, zoom/pan, lens warp, click effects, keystroke overlay)
+  → H.264 encode
+  → Output: Rendered MP4 video
+```
+
+**Rendering options (NativeRenderOptions):**
+
+| Field | Values | Purpose |
+|-------|--------|---------|
+| `sessionDir` | Path | Directory with raw recording data |
+| `planPath` | Path | JSON file with rendering plan (zoom, effects, etc.) |
+| `outputPath` | Path | Output video file |
+| `outputWidth` | Integer | Output resolution width |
+| `proxyMode` | `auto`, `1080p`, `full`, `none` | Resolution proxy for faster rendering |
+| `metricsJson` | JSON string | Render performance metrics output |
+| `realtime` | Boolean | Real-time vs. offline rendering |
+
+**Effects pipeline:**
+- **Motion blur** — Configurable shutter angle and quality (`apply_camera_motion_blur_plane_into`)
+- **Zoom/pan** — Window-based zoom with focus points (`apply_zoom_pan_i420_into`)
+- **Lens warp** — I420 lens distortion effect (`apply_lens_warp_i420_into`)
+- **Click effects** — Visual indicators for mouse clicks
+- **Keystroke overlay** — On-screen keystroke display
+- **Cursor styling** — Multiple cursor render styles
+
+**Video processing details:**
+- I420 YUV420p color space (requires even dimensions)
+- CPU-based compositing (no GPU required — works in VNC/SwiftShader environment)
+- Template file: `recording_render_proxy_1080p.mp4` (reference for 1080p proxy rendering)
+- FFmpeg integration via dynamic linking (libavcodec, libavformat, libavutil)
+- Render metrics: per-stage FPS (decode, composite, encode)
+
+**Source paths visible in binary:**
+```
+packages/polished-renderer/src/compositor/cpu.rs
+packages/polished-renderer/src/compositor/effects/motion_blur.rs
+packages/polished-renderer/src/compositor/effects/zoom.rs
+packages/polished-renderer/src/compositor/i420_frame.rs
+packages/polished-renderer/src/compositor/frame.rs
+packages/polished-renderer/src/scheduler/frame_scheduler.rs
+```
+
+This confirms polished-renderer lives in the `everysphere` monorepo under `packages/polished-renderer/`.
 
 ---
 
@@ -1762,7 +1990,7 @@ strings /exec-daemon/index.js | grep "CLAUDE.md"               # → CLAUDE.md l
 crane config public.ecr.aws/k0i0n2g5/cursorenvironments/universal:default-b8e9345  # → full Dockerfile history
 crane manifest public.ecr.aws/k0i0n2g5/cursorenvironments/universal:default-b8e9345  # → layer manifest
 
-# === Added March 4, 2026 (from inside live sandbox via Claude Code) ===
+# === Added March 4, 2026 — Wave 1 (from inside live sandbox via Claude Code) ===
 ls -la /exec-daemon/                    # → full file layout with sizes (rg, gh, polished-renderer.node)
 file /exec-daemon/polished-renderer.node  # → ELF shared object (N-API addon)
 file /exec-daemon/rg                    # → static-pie ELF (bundled ripgrep)
@@ -1789,4 +2017,23 @@ strings /exec-daemon/index.js | grep "BuiltinTool"             # → 20 server-s
 strings /exec-daemon/index.js | grep "RERANKER_ALGORITHM"      # → 10 reranker algorithms
 strings /exec-daemon/index.js | grep "gemini\|smart.allowlist" # → Gemini command classifier
 strings /exec-daemon/index.js | grep "InvocationContext"       # → IDE state, GitHub PR, Slack thread triggers
+
+# === Added March 4, 2026 — Wave 2 (cursorsandbox deep dive, security, infrastructure) ===
+strings /exec-daemon/cursorsandbox | grep -i "sandbox:"        # → 7-step sandbox init process
+strings /exec-daemon/cursorsandbox | grep -i "landlock"        # → Landlock LSM integration
+strings /exec-daemon/cursorsandbox | grep -i "seccomp"         # → BPF filter for syscall blocking
+strings /exec-daemon/cursorsandbox | grep -i "blackhole"       # → Filesystem blackhole mechanism
+strings /exec-daemon/cursorsandbox | grep -i "policy"          # → Network policy enforcement
+/exec-daemon/cursorsandbox --help                              # → Full CLI flags
+strings /pod-daemon | grep -i "spawn\|process\|config\|listen" # → Pod-daemon is Rust (tonic, rustls, aws-lc)
+strings /exec-daemon/index.js | grep "cursorvm"               # → Multi-region infrastructure domains
+strings /exec-daemon/index.js | grep "anysphere"              # → Internal package names
+strings /exec-daemon/polished-renderer.node | grep -i "render\|video\|codec\|frame" # → Video pipeline details
+cat /home/ubuntu/.claude/.credentials.json                     # → Claude Code OAuth tokens
+cat /home/ubuntu/.config/gh/hosts.yml                          # → GitHub installation token
+cat /home/ubuntu/.gitconfig                                    # → Git credential injection
+cat /proc/self/status | grep Seccomp                           # → Seccomp: 0 (no host seccomp)
+curl -s 169.254.169.254 --connect-timeout 2                   # → Connection timeout (metadata blocked)
+ss -tlnp                                                       # → Ports 26500/50052 on 0.0.0.0
+curl -s https://public-asphr-vm-daemon-bucket.s3.us-east-1.amazonaws.com/ # → AccessDenied (listing blocked)
 ```
