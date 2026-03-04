@@ -2042,7 +2042,60 @@ Top processes by memory from inside the sandbox:
     └── polished-renderer      # Built from Rust source during Docker image build
 ```
 
-**Key finding:** The Ansible `files/polished-renderer/` directory contains the **full Rust source code** for the polished-renderer, which is compiled during the Docker image build. This means the source is available in the public ECR image.
+**Key finding:** The Ansible `files/polished-renderer/` directory contains the **full Rust source code** (7,171 lines across 33 files) for the polished-renderer, compiled during Docker image build. **The source is available in the public ECR image.** Also uses Bazel (`BUILD.bazel`) in the monorepo.
+
+### polished-renderer Source Code Summary (from public ECR image)
+
+```
+src/
+├── main.rs                           # 163 lines — CLI entry (clap): --session-dir, --plan, --output, --motion-blur-*
+├── lib.rs                            # 566 lines — Core render orchestration
+├── config.rs                         # 5 lines
+├── error.rs                          # 23 lines
+├── logging.rs                        # 14 lines
+├── bench.rs                          # 214 lines — Proxy random access benchmarking
+├── proxy.rs                          # 337 lines — Proxy video management
+├── proxy_generation.rs               # 483 lines — Generate proxy videos for fast seeking
+├── plan/
+│   ├── types.rs                      # 409 lines — RenderPlan schema (see below)
+│   └── parser.rs                     # 27 lines
+├── compositor/
+│   ├── cpu.rs                        # 390 lines — CPU-based I420 compositing
+│   ├── i420_frame.rs                 # 144 lines — YUV420p frame representation
+│   ├── frame.rs                      # 103 lines — Output frame abstraction
+│   └── effects/
+│       ├── cursor.rs                 # 858 lines — Cursor path rendering (14 cursor types, 5 motion styles)
+│       ├── keystrokes.rs             # 1,244 lines — On-screen keystroke overlay (largest file!)
+│       ├── motion_blur.rs            # 338 lines — Camera motion blur with shutter angle simulation
+│       ├── zoom.rs                   # 338 lines — Zoom/pan with focus points
+│       └── lens_warp.rs              # 121 lines — Lens distortion effect
+├── easing/
+│   ├── bezier.rs                     # 44 lines — Bezier curve evaluation
+│   └── presets.rs                    # 38 lines — Easing presets
+├── scheduler/
+│   ├── frame_scheduler.rs            # 583 lines — Frame-level scheduling with time mapping
+│   └── time_mapper.rs               # 133 lines — Source→output time mapping
+└── video/
+    ├── decoder.rs                    # 204 lines — FFmpeg video decoder
+    ├── encoder.rs                    # 138 lines — FFmpeg H.264 encoder
+    └── verify.rs                     # 164 lines — Video file verification
+```
+
+### Exec-Daemon Environment Variables (from webpack bundle)
+
+| Variable | Purpose |
+|----------|---------|
+| `CLOUD_AGENT_INJECTED_SECRET_NAMES` | Enterprise secrets injected into sandbox |
+| `CURSOR_API_BASE_URL` | Overridable API endpoint (default: `https://api2.cursor.sh`) |
+| `CURSOR_CONFIG_DIR` / `CURSOR_DATA_DIR` | Config and data directories |
+| `CURSOR_WEBSITE_URL` | Website URL (default: `https://cursor.com`) |
+| `__CURSOR_SANDBOX_ENV_RESTORE` | Mechanism to restore environment after sandbox |
+| `VSCODE_VERSION` | VS Code compatibility layer |
+| `EVERYSPHERE_RIPGREP_PATH` | Path to bundled ripgrep |
+| `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` | Network proxy settings (set by cursorsandbox) |
+| `OTEL_EXPORTER_*` | OpenTelemetry configuration |
+| `GRPC_*` | gRPC configuration (SSL, trace, verbosity) |
+| `DISPLAY` | X11 display for VNC |
 
 ### Desktop Configuration (anyos.conf)
 
