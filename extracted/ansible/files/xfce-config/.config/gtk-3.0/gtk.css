@@ -1,0 +1,29 @@
+/*
+ * AnyOS desktop (cloud-agent VNC)
+ * macOS-like menu bar foreground for the XFCE top panel (light mode).
+ *
+ * macOS menu bar items use the system label color which resolves to black in light mode.
+ */
+
+/* XFCE panel window */
+.xfce4-panel,
+window.xfce4-panel,
+#XfcePanelWindow {
+  color: #000000;
+}
+
+/* Ensure panel plugin widgets inherit the same foreground */
+.xfce4-panel button,
+.xfce4-panel label,
+window.xfce4-panel button,
+window.xfce4-panel label,
+#XfcePanelWindow button,
+#XfcePanelWindow label {
+  color: #000000;
+}
+
+/* Clock plugin: force label color explicitly (theme sometimes overrides) */
+#clock-button label {
+  color: #000000;
+}
+

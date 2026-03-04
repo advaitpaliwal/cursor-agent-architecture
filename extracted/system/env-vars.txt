@@ -1,0 +1,16 @@
+CARGO_HOME=/usr/local/cargo
+DISPLAY=:1
+GIT_DISCOVERY_ACROSS_FILESYSTEM=0
+HOME=/home/ubuntu
+HOSTNAME=dc542321264b
+LANG=en_US.UTF-8
+LC_ALL=en_US.UTF-8
+PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PWD=/home/ubuntu
+RUSTUP_HOME=/usr/local/rustup
+RUST_VERSION=1.83.0
+SHLVL=1
+TERM=xterm-256color
+_=/usr/bin/env
+VNC_DPI=96
+VNC_RESOLUTION=1920x1200x24

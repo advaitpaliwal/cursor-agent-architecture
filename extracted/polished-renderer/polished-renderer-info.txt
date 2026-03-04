@@ -1,0 +1,5 @@
+/opt/cursor/polished-renderer/polished-renderer: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=e41b2334bad0d6721ef3dd003fcb55cfa6340aad, for GNU/Linux 3.2.0, not stripped
+total 5928
+drwxr-xr-x 1 root root      34 Feb 24 07:14 .
+drwxr-xr-x 1 root root      14 Feb 24 07:14 ..
+-rwxr-xr-x 1 root root 6066800 Feb 24 07:14 polished-renderer

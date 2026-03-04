@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfwm4" version="1.0">
+  <property name="general" type="empty">
+    <property name="theme" type="string" value="WhiteSur-Light"/>
+    <property name="title_font" type="string" value="ANYOS_TITLE_FONT_NAME ANYOS_TITLE_FONT_SIZE"/>
+    <property name="button_layout" type="string" value="CHM|O"/>
+    <property name="title_alignment" type="string" value="center"/>
+    <property name="use_compositing" type="bool" value="true"/>
+    <!-- Disable shadows under dock windows to prevent Plank visibility issues -->
+    <property name="show_dock_shadow" type="bool" value="false"/>
+    <property name="show_popup_shadow" type="bool" value="false"/>
+    <property name="shadow_opacity" type="int" value="50"/>
+    <!-- Ensure dock windows (like Plank) stay above other windows -->
+    <property name="raise_on_click" type="bool" value="true"/>
+    <!-- Don't pass click-through on docks -->
+    <property name="click_to_focus" type="bool" value="true"/>
+  </property>
+</channel>

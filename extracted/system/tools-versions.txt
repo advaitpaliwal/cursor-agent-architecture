@@ -1,0 +1,27 @@
+=== Node ===
+no node
+=== NPM ===
+no npm
+=== Python ===
+Python 3.12.3
+=== Go ===
+go version go1.22.2 linux/amd64
+=== Rust ===
+rustc 1.83.0 (90b35a623 2024-11-26)
+=== Java ===
+openjdk 21.0.10 2026-01-20
+OpenJDK Runtime Environment (build 21.0.10+7-Ubuntu-124.04)
+OpenJDK 64-Bit Server VM (build 21.0.10+7-Ubuntu-124.04, mixed mode, sharing)
+=== Docker ===
+no docker
+=== Git ===
+git version 2.43.0
+=== GCC ===
+gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+=== Ruby ===
+no ruby
+=== PHP ===
+=== Dotnet ===
+no dotnet
+=== Bun ===
+no bun
