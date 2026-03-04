@@ -1,0 +1,124 @@
+# Subagent System - Complete Protocol Documentation
+# Extracted from exec-daemon webpack bundle (/exec-daemon/index.js)
+
+## Overview
+Subagents are isolated AI sessions spawned by the main agent through the
+ExecService exec stream. They run in separate contexts with their own
+system prompts but share the same exec-daemon instance.
+
+## SubagentArgs (Request via ExecServerMessage.subagent_args)
+Fields:
+  tool_call_id: string - Links to parent's tool call (UI, analytics, cancellation)
+  subagent_type: string - Config lookup key (e.g., "generalPurpose", "explore")
+  model_id: string - Server-resolved model ID for the subagent
+  prompt: string - The task prompt for the subagent
+  readonly: bool - If true, restricted write operations
+  resume_agent_id: optional string - Resume existing subagent by ID
+  run_in_background: optional bool - Non-blocking background execution
+  continuation_config: ClientContinuationConfig - Client-side loop control
+  parent_conversation_id: optional string - Links transcripts to parent
+  credentials: oneof {
+    api_key_credentials: ApiKeyCredentials (BYOK)
+    azure_credentials: AzureCredentials
+    bedrock_credentials: BedrockCredentials
+  }
+
+## ClientContinuationConfig
+Controls how the subagent's agentic loop runs on the client:
+  idle_threshold: int32 - Consecutive idle iterations before escape hatch
+  max_loops: int32 - Hard cap on total loop iterations (0 = unlimited)
+  nudge_message: string - Sent when model is idle but below threshold
+  escape_message_template: string - Template with {idle_count} and {escape_token}
+  collect_background_children: bool - Collect child subagent results after loop
+  children_completed_message_template: string - Template with {summaries}
+
+## SubagentResult (Response)
+  result: oneof {
+    success: SubagentSuccess
+    error: SubagentError
+  }
+
+## SubagentPersistedState
+  conversation_state: ConversationStateStructure - Full conversation state
+  created_timestamp_ms: uint64
+  last_used_timestamp_ms: uint64
+
+## Subagent Types (from SubagentType enum)
+  UNSPECIFIED = 0
+  GENERAL_PURPOSE = 1  - Full tool access
+  EXPLORE = 2          - Read-only codebase exploration
+  PLAN = 3             - Architecture planning (no writes)
+
+## Built-in Subagent Names
+  EXCLUDED_SUBAGENT_NAMES = ["claude-code-tutor"]
+
+## Key Architecture Insights
+
+### 1. Client-Side Continuation Loop
+The subagent loop runs CLIENT-SIDE (on exec-daemon), not server-side.
+The server sends a ClientContinuationConfig that controls:
+- When to nudge the model if it goes idle
+- When to offer an escape hatch (after N idle iterations)
+- Hard limits on total iterations
+- Whether to collect background children results
+
+### 2. Background Subagents
+Subagents can run in the background (run_in_background: true).
+The parent agent continues execution while the subagent works.
+When collect_background_children is true, after the parent's loop exits,
+it waits for all background children to complete and gets their summaries.
+
+### 3. Subagent Persistence
+Each subagent's state is persisted in ConversationStateStructure.subagent_states
+(a map keyed by agent ID). This allows subagents to be resumed across
+conversation turns using resume_agent_id.
+
+### 4. BYOK Support
+Subagents can use the user's own credentials (API key, Azure, or Bedrock)
+through the credentials oneof. This means BYOK users can spawn subagents
+with their own model access.
+
+### 5. Readonly Mode
+When readonly=true, the subagent has restricted write operations.
+This is used for "explore" type subagents that only read/search code.
+
+## ConversationStateStructure.subagent_states
+  Map<string, SubagentPersistedState>
+  - Key: agent ID (UUID)
+  - Value: full conversation state + timestamps
+
+## Task Tool (how parent spawns subagents)
+The "Task" tool in the protobuf is how the main agent requests subagent creation:
+  TaskToolCall {
+    task_args: TaskArgs
+    task_result: TaskResult
+    task_error: TaskError
+  }
+  TaskArgs {
+    prompt: string
+    subagent_type: SubagentType
+    model_id: string
+    resume_agent_id: string
+    run_in_background: bool
+  }
+  TaskResult = TaskSuccess { text: string }
+
+## BackgroundTask System
+  BackgroundTaskKind enum:
+    UNSPECIFIED = 0
+    BACKGROUND_TASK = 1
+    BACKGROUND_SHELL = 2
+
+  BackgroundTaskStatus enum:
+    PENDING = 0
+    RUNNING = 1
+    COMPLETED = 2
+    FAILED = 3
+    CANCELLED = 4
+
+  BackgroundTaskCompletion {
+    task_id: string
+    success: bool
+    result: string
+    error_message: string
+  }
