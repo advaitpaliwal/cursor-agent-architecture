@@ -2827,3 +2827,94 @@ curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cu
 # cat /exec-daemon/exec_daemon_version ; curl -I "$(cat /exec-daemon/exec_daemon_version)"
 # python3 parser for /proc/net/tcp and /proc/net/tcp6 to extract peer connections
 ```
+
+---
+
+## Wave 9-14 Discoveries (Session 2)
+
+### Connect-RPC API Surface (LIVE TESTED)
+Three services discovered on exec-daemon, all confirmed working:
+
+**Port 26053 (HTTP):**
+- `agent.v1.ExecService` — Main agent execution (ServerStreaming)
+- `agent.v1.ControlService` — 16 RPCs: Ping, ListDirectory, ReadTextFile, WriteTextFile, ReadBinaryFile, WriteBinaryFile, GetDiff, GetWorkspaceChangesHash, RefreshGithubAccessToken, WarmRemoteAccessServer, ListArtifacts, UploadArtifacts, GetMcpRefreshTokens, DownloadCursorServer, UpdateEnvironmentVariables, Exec
+
+**Port 26054 (WebSocket):**
+- `agent.v1.PtyHostService` — 6 RPCs: SpawnPty, AttachPty, SendInput, ResizePty, ListPtys, TerminatePty
+
+Auth: Bearer token from `--auth-token` CLI flag. Protocol: Connect-RPC v1.6.1 (buf).
+
+### Exec Protocol (21 Tool Types)
+The ExecService uses envelope-framed JSON streaming. The orchestrator sends `ExecServerMessage` and streams back `ExecClientMessage` + `ExecClientControlMessage`. Tool types include: shell, read, write, delete, grep, ls, diagnostics, request_context, mcp, shell_stream, background_shell, fetch, record_screen, computer_use, write_shell_stdin, execute_hook, subagent, force_background_shell.
+
+### Live RequestContext Capture
+Successfully called `request_context_args` via the ExecService to capture the full 265KB `RequestContext` — the exact data package exec-daemon sends to aiserver for prompt construction. Contains: 20 cursor rules, 20 agent skills, git repo info, environment details, sandbox config.
+
+### Network Topology
+- exec-daemon connects **directly to api.anthropic.com:443** for LLM inference (3 concurrent connections)
+- Google/Firebase on port 5228 for push notifications
+- api2.cursor.sh used for tracing/observability only
+- Orchestrator at 192.168.24.21 connects to both pod-daemon and exec-daemon
+
+### Auth Token Extraction
+From `/proc/PID/cmdline`:
+- `--auth-token`: SHA256 hex for Connect-RPC auth
+- `--trace-auth-token`: JWT with `type: "exec_daemon"`, issued by `authentication.cursor.sh`
+
+### Subagent System
+- Types: GENERAL_PURPOSE, EXPLORE (readonly), PLAN (no writes)
+- `ClientContinuationConfig`: idle_threshold, max_loops, nudge_message, escape_message_template
+- Background subagents with collect_background_children
+- BYOK credentials passthrough (API key, Azure, Bedrock)
+- Persistent state in `ConversationStateStructure.subagent_states`
+
+### Secret Scanner Git Hooks
+At `~/.cursor/agent-hooks/`:
+- `pre-commit.cursor`: Scans staged files for secret values (from `CLOUD_AGENT_INJECTED_SECRET_NAMES` env var)
+- `commit-msg.cursor`: Scans commit messages for secrets
+- `commit-msg.cursor.co-author`: Auto-appends user as co-author
+- Smart merge handling with AUTO_MERGE/MERGE_MSG fallback
+
+### Proprietary Skill Prompts (6 templates extracted)
+- CREATING_SKILLS_CONTENT (493 lines)
+- CREATING_SUBAGENTS_CONTENT (219 lines)
+- CREATING_CURSOR_RULES_CONTENT (158 lines)
+- MIGRATE_TO_SKILLS_CONTENT (127 lines)
+- UPDATE_CURSOR_SETTINGS_CONTENT (114 lines)
+- SHELL_COMMAND_CONTENT (18 lines)
+
+### Files Index (extracted/)
+```
+exec-daemon-code/
+├── connect-rpc-services.txt      # 3 gRPC services, 22+ RPCs
+├── exec-protocol.txt             # ExecServerMessage/ExecClientMessage protocol
+├── live-request-context.json     # 265KB live RequestContext capture
+├── secret-scanner-hooks.txt      # Git hook secret scanning system
+├── subagent-system.txt           # Complete subagent protocol
+├── prompt-construction.txt       # Server-side prompt assembly pipeline
+├── tool-implementations.txt      # Tool execution code (sandbox, grep, computer-use)
+├── protobuf-messages.txt         # 17 key protobuf message definitions
+├── diff-algorithm.txt            # ApplyAgentDiff, FileChangeTracker
+├── mcp-and-plugins.txt           # MCP infrastructure + plugin system
+├── skill-prompt-*.txt            # 6 proprietary skill prompt templates
+├── claude-to-cursor-mapping.js   # CLAUDE_TOOL_TO_CURSOR_TOOL translation
+├── client-side-tools-v2.txt      # 53 tool definitions with IDs
+├── builtin-tools.txt             # 20 server-side tools
+├── agent-modes-and-models.txt    # AgentMode, ThinkingStyle, SubagentType
+├── security-and-sandbox.txt      # SandboxPolicy, NetworkPolicy
+├── enterprise-and-billing.txt    # TeamRole, UsageEventKind, SpendType
+├── bugbot-and-integrations.txt   # Bugbot, Linear, Slack integrations
+├── computer-use-enums.txt        # MouseButton, ScrollDirection, ClickType
+├── exec-daemon-cli-flags.txt     # 22 CLI flags + 48 env vars
+└── credential-providers.txt      # Azure, Bedrock credential schemas
+
+binary-analysis/
+├── pod-daemon-analysis.txt       # anyrun.v1.PodDaemonService (2 RPCs)
+├── cursorsandbox-analysis.txt    # 7-step sandbox creation pipeline
+├── polished-renderer-analysis.txt # Video rendering pipeline
+└── isod-analysis.txt             # anyrun.v1.IsodService (10 RPCs)
+
+network-topology.txt              # IP addresses, DNS, connection map
+docker-in-docker-inspection.json  # Full DinD container config
+all-protobuf-enums.txt            # 100+ enums from agent.v1/aiserver.v1
+```
