@@ -1,0 +1,54 @@
+# Network Topology - Cursor Background Agent Sandbox
+# Discovered via /proc/net/tcp, DNS resolution, and API probing
+
+## Container Network: Host mode (172.30.0.2)
+
+## Active Connections from exec-daemon (PID 354)
+
+### Outbound TLS (port 443)
+1. 160.79.104.10:443 = api.anthropic.com (3 connections)
+   - Direct LLM API calls to Claude
+   - This confirms Cursor uses Anthropic's API directly
+
+2. 34.149.66.137:443 = *.bc.googleusercontent.com
+   - Likely OpenTelemetry/tracing endpoint or Gemini API
+
+3. 172.64.155.209:443 = Cloudflare
+   - Likely cursor.com CDN or API proxy
+
+### Google Services
+4. 64.233.180.188:5228 = pe-in-f188.1e100.net (Google)
+   - Port 5228 = Android Cloud to Device Messaging / Firebase
+   - Used for push notifications to the agent
+
+### Internal (localhost)
+5. 127.0.0.1:5901 = TigerVNC server (XFCE4 desktop)
+6. 127.0.0.1:3000 = Next.js dev server (user's web app)
+
+### Listening Ports (this container)
+- 0.0.0.0:2375 (0x0947) = Docker API (socat proxy, on Docker host)
+- 0.0.0.0:50052 (0xC384) = isod gRPC (on Docker host)
+- 0.0.0.0:26500 (0x6784) = pod-daemon gRPC
+- 0.0.0.0:26053 (0x65C5) = exec-daemon Connect-RPC (HTTP)
+- 0.0.0.0:26054 (0x65C6) = exec-daemon PtyHost (WebSocket)
+- 127.0.0.1:5901 (0x170D) = TigerVNC
+- 0.0.0.0:3000 (0x0BB8) = User's Next.js app
+
+### Inbound Connection (from orchestrator)
+- 192.168.24.21:* -> 172.30.0.2:26500 (pod-daemon)
+- 192.168.24.21:* -> 172.30.0.2:26053 (exec-daemon)
+  - 192.168.24.21 = K8s node / vm-orchestrator
+
+## DNS Resolution
+- api2.cursor.sh -> api2geo.cursor.sh -> api2direct.cursor.sh -> 8 AWS IPs
+  (18.204.x.x, 18.205.x.x, 18.208.x.x, 34.231.x.x, 44.209.x.x, 44.213.x.x, 44.219.x.x, 100.51.x.x)
+- api.anthropic.com -> 160.79.104.10
+- cursor.com -> 76.76.21.21 (Vercel)
+- authentication.cursor.sh (from JWT issuer)
+
+## Key Insight: Direct Anthropic API
+Cursor's exec-daemon connects DIRECTLY to api.anthropic.com (160.79.104.10)
+for LLM inference, not through a proxy or custom endpoint. The trace-auth-token
+JWT (type: "exec_daemon") is likely used for Anthropic API auth alongside
+Cursor's own authentication layer. The --trace-endpoint (api2.cursor.sh) is
+used for observability/tracing, NOT for LLM calls.

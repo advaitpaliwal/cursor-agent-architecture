@@ -1,0 +1,126 @@
+# ExecService Protocol - The Agent's Internal Communication Layer
+# This is how the orchestrator (vm-orchestrator in K8s) talks to exec-daemon
+# Protocol: Connect-RPC ServerStreaming over HTTP/1.1
+# Endpoint: POST /agent.v1.ExecService/Exec
+# Content-Type: application/connect+json (envelope-framed)
+#
+# LIVE TESTED: All message types confirmed working via direct API calls
+
+## Envelope Format
+# Each message is envelope-framed:
+# - 1 byte: flags (0x00 = normal, 0x02 = end-of-stream trailer)
+# - 4 bytes: big-endian uint32 length
+# - N bytes: JSON payload
+
+## ExecServerMessage (Request)
+# The orchestrator sends ONE message, exec-daemon streams back responses
+# Fields:
+#   id: uint32 (request correlation ID)
+#   exec_id: string (optional, for attachable executions)
+#   message: oneof {
+#     shell_args (2): ShellArgs - execute shell command
+#     write_args (3): WriteArgs - write file
+#     delete_args (4): DeleteArgs - delete file
+#     grep_args (5): GrepArgs - search files
+#     read_args (7): ReadArgs - read file
+#     redacted_read_args (29): ReadArgs - read with secret redaction
+#     ls_args (8): LsArgs - list directory
+#     diagnostics_args (9): DiagnosticsArgs - get diagnostics
+#     request_context_args (10): RequestContextArgs - get full prompt context
+#     mcp_args (11): McpArgs - call MCP tool
+#     shell_stream_args (14): ShellArgs - streaming shell execution
+#     background_shell_spawn_args (16): BackgroundShellSpawnArgs
+#     list_mcp_resources_exec_args (17): ListMcpResourcesExecArgs
+#     read_mcp_resource_exec_args (18): ReadMcpResourceExecArgs
+#     fetch_args (20): FetchArgs - HTTP fetch
+#     record_screen_args (21): RecordScreenArgs - screen recording
+#     computer_use_args (22): ComputerUseArgs - mouse/keyboard/screenshot
+#     write_shell_stdin_args (23): WriteShellStdinArgs
+#     execute_hook_args (27): ExecuteHookArgs - run hook script
+#     subagent_args (28): SubagentArgs - subagent operations
+#     force_background_shell_args (30): ForceBackgroundShellArgs
+#   }
+#   span_context (19): optional SpanContext
+
+## ExecClientMessage (Response)
+# Corresponding response for each request type:
+#   shell_result, write_result, delete_result, grep_result,
+#   read_result, redacted_read_result, ls_result, diagnostics_result,
+#   request_context_result, mcp_result, shell_stream,
+#   background_shell_spawn_result, list_mcp_resources_exec_result,
+#   read_mcp_resource_exec_result, fetch_result, record_screen_result,
+#   computer_use_result, write_shell_stdin_result, execute_hook_result,
+#   subagent_result, force_background_shell_result
+
+## ExecClientControlMessage (Control)
+# Sent alongside or after client messages:
+#   stream_close: { id } - indicates stream for this request ID is done
+
+## LIVE TEST RESULTS
+
+### request_context_args -> request_context_result
+# Returns the FULL RequestContext that gets sent to aiserver:
+# - rules: CursorRule[] (20 rules from .agents/skills/ and .claude/skills/)
+# - env: { osVersion, workspacePaths, shell, timeZone, sandboxSupported, etc. }
+# - gitRepos: [{ path, status, branchName, remoteUrl }]
+# - agentSkills: AgentSkill[] (20 skills with full descriptions)
+# - commitAttributionMessage: "enabled"
+# - sharedNotesListing: string
+# - supportsMcpAuth: true
+# Response size: ~265KB for a single workspace
+
+### shell_args -> shell_result
+# Requires parsingResult field (command parser output):
+# {
+#   "shellArgs": {
+#     "command": "whoami",
+#     "workingDirectory": "/tmp",
+#     "timeout": 5000,
+#     "parsingResult": {
+#       "parsingFailed": false,
+#       "executableCommands": [{"command": "whoami", "args": []}]
+#     },
+#     "skipApproval": true
+#   }
+# }
+# Response: { success: { command, workingDirectory, stdout, executionTime, localExecutionTimeMs } }
+# Or: { spawnError: { command, workingDirectory, error } }
+
+### read_args -> read_result
+# { "readArgs": { "path": "/etc/os-release", "toolCallId": "id" } }
+# Response: { success: { path, content, totalLines, fileSize } }
+# Or: { fileNotFound | error | rejected | permissionDenied | invalidFile }
+
+### diagnostics_args -> diagnostics_result
+# {} -> { success: {} }
+
+## ShellArgs Fields (complete)
+# command: string
+# workingDirectory: string
+# timeout: int32 (ms)
+# toolCallId: string
+# parsingResult: ShellCommandParsingResult (REQUIRED)
+# requestedSandboxPolicy: optional SandboxPolicy
+# fileOutputThresholdBytes: optional uint64
+# isBackground: bool
+# skipApproval: bool
+# timeoutBehavior: TimeoutBehavior enum
+# hardTimeout: optional int32 (ms)
+# description: optional string (model-provided, 5-10 words)
+# classifierResult: optional CommandClassifierResult (Gemini smart allowlist)
+# closeStdin: bool
+
+## CommandClassifierResult
+# Used by Gemini-based command classification for smart auto-approval
+# Determines if a shell command is safe to run without user confirmation
+
+## Key Architecture Insights
+1. The orchestrator sends a SINGLE ExecServerMessage per tool call
+2. exec-daemon streams back one or more ExecClientMessage responses
+3. A final ExecClientControlMessage.streamClose indicates completion
+4. request_context_args is how the orchestrator gets the full prompt context
+5. Shell commands require pre-parsed command structure (not just raw string)
+6. The Gemini classifier result enables smart auto-approval of safe commands
+7. Secret redaction is a separate tool type (redacted_read_args vs read_args)
+8. Background shell operations are first-class protocol citizens
+9. Subagent operations go through the same exec stream protocol
