@@ -2628,4 +2628,104 @@ curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cu
 # Tag format: {variant}-{7char-sha} matching everysphere monorepo commits
 # All layers downloadable: manifests, configs, tar.gz layers all accessible
 # Can reconstruct any image variant by downloading all layers
+
+# === Added March 4, 2026 — Wave 7 (S3 artifact bucket, exec-daemon tarball, orchestration) ===
+
+## S3 Artifact Bucket: public-asphr-vm-daemon-bucket
+
+### Discovery: exec-daemon IS publicly downloadable!
+# The version file at /exec-daemon/exec_daemon_version contains:
+# https://public-asphr-vm-daemon-bucket.s3.us-east-1.amazonaws.com/exec-daemon/exec-daemon-x64-e11bf2731fbec97c4727b661f83720499761ba2f96cf8cc17212b7b25a3136ac.tar.gz
+#
+# This URL returns HTTP 200 — 70,431,929 bytes (67MB)
+# Content-Type: application/x-tar
+# Server-Side-Encryption: AES256
+# Last-Modified: Wed, 04 Mar 2026 16:32:21 GMT
+
+### Exec-daemon Tarball Contents (16 files, all in dist-package/):
+#   exec-daemon        327 bytes    bash runner script (exec node index.js)
+#   package.json       140 bytes    @anysphere/exec-daemon-runtime, built 2026-03-04T16:32:02.576Z
+#   index.js      15,254,116 bytes  webpack bundle (agent logic, gRPC, protobuf)
+#   cursorsandbox  4,514,720 bytes  Rust binary (per-command sandboxing)
+#   node         123,405,064 bytes  bundled Node.js binary
+#   gh            54,972,600 bytes  GitHub CLI binary
+#   rg             5,416,872 bytes  ripgrep binary
+#   polished-renderer.node 5,799,592 bytes  N-API video rendering addon
+#   pty.node          72,664 bytes  N-API PTY addon
+#   97f64a4d8eca9a2e35bb.mp4  63,178 bytes  embedded MP4 (splash/loading animation?)
+#   252.index.js, 407.index.js, 511.index.js, 953.index.js, 980.index.js  (code-split chunks)
+
+### URL Pattern:
+# exec-daemon/exec-daemon-{arch}-{sha256_content_hash}.tar.gz
+# The hash (64 chars) is a SHA-256 content hash of the tarball, NOT a git SHA
+# Architecture: x64 (other archs may exist: arm64)
+
+### S3 Bucket Prefix Enumeration:
+# Every prefix returns HTTP 403 (exists but access denied), NOT 404:
+#   /exec-daemon/   → 403 (but individual files with known hash → 200!)
+#   /cursorsandbox/  → 403
+#   /polished-renderer/ → 403
+#   /node/           → 403
+#   /rg/             → 403
+#   /gh/             → 403
+#   /agent/          → 403
+#   /pod-daemon/     → 403 (pod-daemon with exact binary hash → also 403)
+#
+# Conclusion: exec-daemon tarballs are intentionally public (hash-based addressing)
+# Other artifacts (pod-daemon, individual binaries) are access-restricted
+# The bucket stores ALL sandbox artifacts but with selective public access
+
+### Orchestration Flow (reconstructed):
+# 1. Cursor orchestrator (cursorvm-manager) receives task request
+# 2. EC2 instance with Docker Engine 29.1.4 (Debian 12) is selected/provisioned
+# 3. Container started with:
+#    - Image: public.ecr.aws/k0i0n2g5/cursorenvironments/universal:{variant}-{hash}
+#    - Entrypoint: /pod-daemon (injected at container creation time)
+#    - Network: host mode, Privileged: true, SecurityOpt: label=disable
+#    - Env: GIT_LFS_SKIP_SMUDGE=1, DISPLAY=:1, VNC_RESOLUTION=1920x1200x24
+# 4. Pod-daemon (Rust, 14.9MB RSS) starts, listens on :26500 gRPC
+# 5. Pod-daemon downloads exec-daemon tarball from S3 bucket (URL from version file)
+#    - Extracts to /exec-daemon/
+#    - Stores download URL in exec_daemon_version
+# 6. Pod-daemon spawns exec-daemon (Node.js) which listens on :26053/:26054
+# 7. Exec-daemon connects to api2.cursor.sh for agent instructions
+# 8. desktop-init.sh starts VNC/XFCE4/Chrome/Docker-in-Docker
+# 9. Agent receives task, executes via tools (shell, browser, computer-use)
+
+### Image Evolution (from ECR tag comparison):
+# Older builds (e.g., default-01e07fd):
+#   - 18 layers, 35 build steps
+#   - Rust 1.82.0 (vs current 1.83.0)
+#   - Cmd: bash (no desktop init)
+#   - NO VNC desktop — just a headless shell!
+# Current builds (e.g., default-b8e9345):
+#   - 23 layers, 44 build steps
+#   - Rust 1.83.0
+#   - Cmd: /usr/local/share/desktop-init.sh
+#   - Full VNC desktop with XFCE4, Chrome, Plank dock, macOS theme
+# The VNC desktop was added AFTER initial deployment — older images were CLI-only
+
+### Container Runtime Details (from Docker API):
+# Container name: pod-kyaoya54prfyzkhl4qagqnuf34-b8e29869
+# Container ID: 9ff6c4253fb5a42fc72ff3d809f94e604f269c23926f6111529f9904dfae1877
+# Image: public.ecr.aws/k0i0n2g5/cursorenvironments/universal:default-b8e9345
+# Image size on disk: 7,313 MB (uncompressed), 2,180 MB compressed
+# Docker host name: d45f01ad4149 (the EC2 instance Docker hostname)
+# Docker host OS: Debian GNU/Linux 12 (bookworm)
+# Docker version: 29.1.4
+# Only 1 container and 1 image on the host (dedicated instance per sandbox)
+
+### Bundled Fonts (macOS fonts in /opt/cursor/ansible/files/fonts/):
+# Courier.ttc, Helvetica.ttc, LucidaGrande.ttc, Monaco.ttf,
+# SanFrancisco.ttf, SanFranciscoMono.ttf, Times.ttc
+# + WhiteSur GTK theme, icons, and cursors from vinceliuice/WhiteSur-gtk-theme
+# Desktop wallpaper: macOS Tiger from Vercel Blob Storage
+
+### Ansible README Confirms:
+# - Monorepo is "everysphere/" with root Cargo.toml
+# - Public Dockerfile: anyrun/public-images/universal/Dockerfile
+# - Internal Dockerfile: .cursor/Dockerfile
+# - Both share the same Ansible playbook and build context
+# - polished-renderer lives in ansible/files/ for both public and internal builds
+# - polished-renderer Cargo.toml uses workspace references, auto-converted for standalone build
 ```

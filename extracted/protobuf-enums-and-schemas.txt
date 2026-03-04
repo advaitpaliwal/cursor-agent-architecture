@@ -1,0 +1,60 @@
+# Extracted Protobuf Enums and Schemas from exec-daemon
+# =====================================================
+
+## BuiltinTool (20 tools)
+ADD_TEST, CREATE_RM_FILES, DELETE_TEST, EDIT, END,
+GET_PROJECT_STRUCTURE, GET_SYMBOLS, GET_TESTS, GOTODEF,
+NEW_EDIT, NEW_FILE, READ_CHUNK, READ_WITH_LINTER,
+RUN_TERMINAL_COMMANDS, RUN_TEST, SAVE_FILE, SEARCH,
+SEMANTIC_SEARCH, UNDO_EDIT, UNSPECIFIED
+
+## RERANKER_ALGORITHM (13 algorithms)
+ADA_EMBEDS, COHERE, GPT_*, IDENTITY, LLAMA,
+LULEA, LULEA_HAIKU, NONE, STARCODER_V,
+UMEA, UNSPECIFIED, VOYAGE, VOYAGE_EMBEDS
+
+## Model IDs Referenced
+claude-3.5-sonnet, claude-4.5-sonnet, gpt-5, o1, o3, o4, codex
+
+## CommandClassifierResult (Gemini classifier for smart allowlist)
+- commands: repeated ClassifiedCommand { name: string, arguments: repeated string }
+- suggested_sandbox_mode: SuggestedSandboxMode enum
+- classification_failed: bool
+
+## CommandClassifierResult.SuggestedSandboxMode
+UNSPECIFIED=0, SANDBOX=1, NO_SANDBOX=2, UNDETERMINED=3
+
+## SandboxPolicy
+- type: SandboxPolicy.Type
+- network_access: optional bool
+- additional_readwrite_paths: repeated string
+- additional_readonly_paths: repeated string
+- debug_output_dir: optional string
+- disable_tmp_write: optional bool (excludes /tmp, /private/tmp, /var/folders/)
+- Note: INSECURE_NONE can be auto-escalated from user's allowlist
+
+## SandboxPolicy.Type
+UNSPECIFIED=0, INSECURE_NONE=1, WORKSPACE_READWRITE=2, WORKSPACE_READONLY=3
+
+## NetworkPolicy
+- version: optional uint32 (must be 1)
+- default_action: DefaultAction enum
+- deny: repeated string (highest priority, domains/wildcards/CIDR)
+- allow: repeated string (domains/wildcards/CIDR)
+- logging: optional NetworkPolicyLoggingConfig
+
+## NetworkPolicy.DefaultAction
+UNSPECIFIED=0, ALLOW=1, DENY=2
+
+## CloudAgentEgressProtectionMode
+UNSPECIFIED=0, ALLOW_ALL=1, DEFAULT_WITH_NETWORK_SETTINGS=2, NETWORK_SETTINGS_ONLY=3
+
+## SubagentType (12 types)
+Bash, BrowserUse, ComputerUse, Config, CursorGuide, Custom,
+Debug, Explore, MediaReview, Shell, Unspecified, VmSetupHelper
+
+## gRPC Services (4 services, 336 total RPCs)
+ControlService: 16 RPCs
+ExecService: 1 RPC
+PtyHostService: 6 RPCs
+DashboardService: 313 RPCs (113 Get, 40 Update, 19 Create, 17 Delete, 17 List, 12 Set, ...)
