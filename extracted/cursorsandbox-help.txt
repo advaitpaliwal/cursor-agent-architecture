@@ -1,0 +1,22 @@
+Sandboxing helper for Everysphere shell-exec
+
+Usage: cursorsandbox [OPTIONS] [COMMAND]...
+
+Arguments:
+  [COMMAND]...  Command to execute under sandbox (everything after --)
+
+Options:
+      --sandbox-policy-cwd <SANDBOX_POLICY_CWD>
+          Working directory for sandbox policy resolution
+      --sandbox-policy <SANDBOX_POLICY>
+          Sandbox policy as JSON string
+      --policy <POLICY_PATH>
+          Path to network policy JSON file (use --policy-json for inline JSON instead)
+      --policy-json <POLICY_JSON>
+          Network policy as inline JSON string (preferred over --policy for security)
+      --policy-strict
+          Fail closed if policy is missing/invalid (default: true)
+      --preflight-only
+          Only perform sandbox preflight (no exec); exits 0 on success, 2 if unsupported
+  -h, --help
+          Print help

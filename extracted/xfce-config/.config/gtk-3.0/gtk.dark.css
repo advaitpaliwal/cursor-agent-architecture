@@ -1,0 +1,26 @@
+/*
+ * AnyOS desktop (cloud-agent VNC)
+ * macOS-like menu bar foreground for the XFCE top panel (dark mode).
+ *
+ * We keep the historical "white" top-nav look as a dark-mode variant.
+ */
+
+.xfce4-panel,
+window.xfce4-panel,
+#XfcePanelWindow {
+  color: #edecec;
+}
+
+.xfce4-panel button,
+.xfce4-panel label,
+window.xfce4-panel button,
+window.xfce4-panel label,
+#XfcePanelWindow button,
+#XfcePanelWindow label {
+  color: #edecec;
+}
+
+#clock-button label {
+  color: #edecec;
+}
+

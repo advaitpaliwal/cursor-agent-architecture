@@ -1,0 +1,65 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library")
+
+# NOTE: This package only builds on macOS/Linux with FFmpeg installed
+# On macOS: brew install ffmpeg pkg-config cmake
+# On Linux: apt install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev cmake pkg-config
+# Build with: bazel build //packages/polished-renderer --spawn_strategy=local --action_env=PATH --action_env=PKG_CONFIG_PATH
+# gazelle:exclude **/*.rs
+
+rust_library(
+    name = "polished-renderer-lib",
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = [
+            "src/main.rs",
+            "src/bench.rs",
+        ],
+    ),
+    compile_data = glob(["assets/**"]),
+    crate_name = "polished_renderer",
+    proc_macro_deps = [
+        "@root_crate_index//:clap_derive-4.5.41",
+        "@root_crate_index//:serde_derive",
+        "@root_crate_index//:serde_repr",
+    ],
+    tags = [
+        "local",  # Disable sandbox to access system libraries
+        "manual",  # Exclude from wildcard builds - requires system FFmpeg
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@root_crate_index//:anyhow",
+        "@root_crate_index//:clap",
+        "@root_crate_index//:crossbeam-channel",
+        "@root_crate_index//:ffmpeg-next",
+        "@root_crate_index//:font-kit",
+        "@root_crate_index//:fontdue",
+        "@root_crate_index//:rayon",
+        "@root_crate_index//:resvg",
+        "@root_crate_index//:serde",
+        "@root_crate_index//:serde_json",
+        "@root_crate_index//:thiserror",
+        "@root_crate_index//:tiny-skia",
+        "@root_crate_index//:tracing",
+        "@root_crate_index//:tracing-subscriber",
+        "@root_crate_index//:usvg",
+    ],
+)
+
+rust_binary(
+    name = "polished-renderer",
+    srcs = ["src/main.rs"],
+    proc_macro_deps = [
+        "@root_crate_index//:clap_derive-4.5.41",
+    ],
+    tags = [
+        "local",
+        "manual",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":polished-renderer-lib",
+        "@root_crate_index//:clap",
+        "@root_crate_index//:serde_json",
+    ],
+)

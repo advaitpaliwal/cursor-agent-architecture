@@ -1,0 +1,166 @@
+{
+    "architecture": "amd64",
+    "config": {
+        "User": "ubuntu",
+        "Env": [
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "TERM=xterm-256color",
+            "LANG=en_US.UTF-8",
+            "LC_ALL=en_US.UTF-8"
+        ],
+        "Cmd": [
+            "bash"
+        ],
+        "WorkingDir": "/",
+        "Labels": {
+            "org.opencontainers.image.ref.name": "ubuntu",
+            "org.opencontainers.image.version": "24.04"
+        },
+        "ArgsEscaped": true,
+        "Shell": [
+            "/bin/bash",
+            "-c"
+        ]
+    },
+    "created": "2026-02-16T10:01:29.924052163Z",
+    "history": [
+        {
+            "created": "2026-01-13T05:37:25.257066546Z",
+            "created_by": "/bin/sh -c #(nop)  ARG RELEASE",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-01-13T05:37:25.289342576Z",
+            "created_by": "/bin/sh -c #(nop)  ARG LAUNCHPAD_BUILD_ARCH",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-01-13T05:37:25.319788795Z",
+            "created_by": "/bin/sh -c #(nop)  LABEL org.opencontainers.image.ref.name=ubuntu",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-01-13T05:37:25.349310826Z",
+            "created_by": "/bin/sh -c #(nop)  LABEL org.opencontainers.image.version=24.04",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-01-13T05:37:27.616424184Z",
+            "created_by": "/bin/sh -c #(nop) ADD file:3077ee44db3cc7d38740d60a05c81418dd3825a007db473658464f52689e867b in / "
+        },
+        {
+            "created": "2026-01-13T05:37:27.960006802Z",
+            "created_by": "/bin/sh -c #(nop)  CMD [\"/bin/bash\"]",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-16T10:01:19.127059291Z",
+            "created_by": "ENV TERM=xterm-256color",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-16T10:01:19.127059291Z",
+            "created_by": "ENV LANG=en_US.UTF-8",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-16T10:01:19.127059291Z",
+            "created_by": "ENV LC_ALL=en_US.UTF-8",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-16T10:01:19.127059291Z",
+            "created_by": "RUN /bin/sh -c apt-get update && apt-get install -y   sudo curl wget git ca-certificates unzip   libatk1.0-0   libatk-bridge2.0-0   libcups2   libdrm2   libdbus-1-3   libxkbcommon0   libxcomposite1   libxdamage1   libxfixes3   libxrandr2   libgbm1   libpango-1.0-0   libcairo2   libasound2t64   libatspi2.0-0   libxshmfence1   libgtk-3-0   libnss3   libnspr4   fonts-liberation   fonts-noto-color-emoji   fonts-noto-cjk   xvfb   xauth   locales   && locale-gen en_US.UTF-8   && apt-get clean   && rm -rf /var/lib/apt/lists/* # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-16T10:01:19.195316397Z",
+            "created_by": "COPY nvm-init.sh /usr/local/bin/ # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-16T10:01:19.237525415Z",
+            "created_by": "RUN /bin/sh -c chmod +x /usr/local/bin/nvm-init.sh # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-16T10:01:19.285912461Z",
+            "created_by": "RUN /bin/sh -c echo \"ubuntu ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/ubuntu &&   chmod 0440 /etc/sudoers.d/ubuntu &&   echo \"Defaults:ubuntu !lecture\" > /etc/sudoers.d/ubuntu-no-lecture &&   chmod 0440 /etc/sudoers.d/ubuntu-no-lecture &&   usermod -s /bin/bash ubuntu &&   mkdir -p /home/ubuntu &&   chown -R ubuntu:ubuntu /home/ubuntu &&   touch /home/ubuntu/.hushlogin # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-16T10:01:19.285912461Z",
+            "created_by": "USER ubuntu",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-16T10:01:19.287455693Z",
+            "created_by": "WORKDIR /home/ubuntu",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-16T10:01:19.662532831Z",
+            "created_by": "RUN /bin/sh -c git clone https://github.com/creationix/nvm.git .nvm &&   cd .nvm &&   git checkout v0.40.3 # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-16T10:01:23.087606627Z",
+            "created_by": "RUN /bin/sh -c bash -c \"source /usr/local/bin/nvm-init.sh && nvm install 22.* && nvm alias default 22.*\" &&   bash -c \"source /usr/local/bin/nvm-init.sh && npm i -g yarn pnpm\" # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-16T10:01:29.88257625Z",
+            "created_by": "RUN /bin/sh -c DPKG_ARCH=$(dpkg --print-architecture) &&   if [ \"$DPKG_ARCH\" = \"amd64\" ]; then ARCH_SUFFIX=\"\"; else ARCH_SUFFIX=\"-${DPKG_ARCH}\"; fi &&   mkdir -p /home/ubuntu/.cache/ms-playwright &&   cd /home/ubuntu/.cache/ms-playwright &&   mkdir -p chromium-1148 && cd chromium-1148 &&   wget --progress=bar:force https://playwright.azureedge.net/builds/chromium/1148/chromium-linux${ARCH_SUFFIX}.zip &&   unzip -q chromium-linux${ARCH_SUFFIX}.zip &&   rm chromium-linux${ARCH_SUFFIX}.zip &&   cd .. &&   mkdir -p ffmpeg-1010 && cd ffmpeg-1010 &&   wget --progress=bar:force https://playwright.azureedge.net/builds/ffmpeg/1010/ffmpeg-linux${ARCH_SUFFIX}.zip &&   unzip -q ffmpeg-linux${ARCH_SUFFIX}.zip &&   rm ffmpeg-linux${ARCH_SUFFIX}.zip &&   cd .. &&   mkdir -p chromium_headless_shell-1148 && cd chromium_headless_shell-1148 &&   wget --progress=bar:force https://playwright.azureedge.net/builds/chromium/1148/chromium-headless-shell-linux${ARCH_SUFFIX}.zip &&   unzip -q chromium-headless-shell-linux${ARCH_SUFFIX}.zip &&   rm chromium-headless-shell-linux${ARCH_SUFFIX}.zip # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-16T10:01:29.924052163Z",
+            "created_by": "RUN /bin/sh -c echo 'export NVM_DIR=\"$HOME/.nvm\"' > /home/ubuntu/.bashrc &&   echo '[ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\"' >> /home/ubuntu/.bashrc &&   echo '[ -s \"$NVM_DIR/bash_completion\" ] && \\. \"$NVM_DIR/bash_completion\"' >> /home/ubuntu/.bashrc &&   echo 'export PS1=\"\\[\\033[36m\\]\\\\W\\[\\033[0m\\] $ \"' >> /home/ubuntu/.bashrc # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-16T10:01:29.924052163Z",
+            "created_by": "WORKDIR /",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-16T10:01:29.924052163Z",
+            "created_by": "USER ubuntu",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-16T10:01:29.924052163Z",
+            "created_by": "SHELL [/bin/bash -c]",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-16T10:01:29.924052163Z",
+            "created_by": "CMD [\"bash\"]",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        }
+    ],
+    "os": "linux",
+    "rootfs": {
+        "type": "layers",
+        "diff_ids": [
+            "sha256:123a078714d5ea9382d4d9f550753aefce8b34ec5ae11ae8273038d3bcbb943f",
+            "sha256:2fd02ee15e6260457b4cb335491940c67059f7ac138a8e06d80cd68e1a650248",
+            "sha256:7805a12d8f094c4c2ac10ddff6a1c32637f4eeb7ec4516451b4df5d9bc2a80e7",
+            "sha256:d40821c01599797b752a587f872a5b54f75996be78ee21a94d1f054705d68cf7",
+            "sha256:6fa102c032a4fa0294ddcc180a9f6b735cedb6c69b70f8ae105cb304bebda149",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+            "sha256:3e6a9d079c718c9005f637d4aaf1f5f821f4de5f28694f98db90deba524eeaec",
+            "sha256:a2af7efed3aa61eb098844733b9d20b8b909b39cc537b435f18eadaeaf25d90c",
+            "sha256:423527856652b47ee1c49d8346e0de1fb30f84430ae743855b2e6499f12151ef",
+            "sha256:862338d9272ebb5857630287583be0b02b7f8aa7e6632380d3a34b322a8de66d"
+        ]
+    }
+}

@@ -1,0 +1,303 @@
+{
+    "architecture": "amd64",
+    "config": {
+        "User": "ubuntu",
+        "ExposedPorts": {
+            "26058/tcp": {},
+            "5901/tcp": {}
+        },
+        "Env": [
+            "PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "TERM=xterm-256color",
+            "GIT_DISCOVERY_ACROSS_FILESYSTEM=0",
+            "LANG=en_US.UTF-8",
+            "LC_ALL=en_US.UTF-8",
+            "RUSTUP_HOME=/usr/local/rustup",
+            "CARGO_HOME=/usr/local/cargo",
+            "RUST_VERSION=1.83.0",
+            "DISPLAY=:1",
+            "VNC_RESOLUTION=1920x1200x24",
+            "VNC_DPI=96"
+        ],
+        "Cmd": [
+            "/usr/local/share/desktop-init.sh"
+        ],
+        "WorkingDir": "/home/ubuntu",
+        "Labels": {
+            "org.opencontainers.image.ref.name": "ubuntu",
+            "org.opencontainers.image.version": "24.04"
+        },
+        "ArgsEscaped": true,
+        "Shell": [
+            "/bin/bash",
+            "-c"
+        ]
+    },
+    "created": "2026-02-24T07:15:03.526012958Z",
+    "history": [
+        {
+            "created": "2026-02-10T16:49:54.555271506Z",
+            "created_by": "/bin/sh -c #(nop)  ARG RELEASE",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-10T16:49:54.597347Z",
+            "created_by": "/bin/sh -c #(nop)  ARG LAUNCHPAD_BUILD_ARCH",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-10T16:49:54.629922453Z",
+            "created_by": "/bin/sh -c #(nop)  LABEL org.opencontainers.image.ref.name=ubuntu",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-10T16:49:54.658571922Z",
+            "created_by": "/bin/sh -c #(nop)  LABEL org.opencontainers.image.version=24.04",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-10T16:49:56.804776604Z",
+            "created_by": "/bin/sh -c #(nop) ADD file:1ae27d2ef4369361104b699712f3897141e394785df5d193d67b44626f57eb87 in / "
+        },
+        {
+            "created": "2026-02-10T16:49:57.226767398Z",
+            "created_by": "/bin/sh -c #(nop)  CMD [\"/bin/bash\"]",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-17T21:17:35.878543975Z",
+            "created_by": "ENV TERM=xterm-256color",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-17T21:17:35.878543975Z",
+            "created_by": "ENV GIT_DISCOVERY_ACROSS_FILESYSTEM=0",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-17T21:17:35.878543975Z",
+            "created_by": "ENV LANG=en_US.UTF-8",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-17T21:17:35.878543975Z",
+            "created_by": "ENV LC_ALL=en_US.UTF-8",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-17T21:17:35.878543975Z",
+            "created_by": "RUN /bin/sh -c apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends   sudo curl wget git gcc g++ clang make zip iputils-ping vim emacs nano   man-db cmake htop ca-certificates oathtool   python3 python3-pip   golang-go   default-jdk   libatk1.0-0 libatk-bridge2.0-0 libcups2 libgtk-3-0 libgbm1 libnss3   xvfb xauth tmux locales libasound2t64   sqlite3 gh   jq yq ripgrep file lsof unzip xz-utils dnsutils net-tools   build-essential pkg-config software-properties-common   ffmpeg   ansible   && rm -rf /var/lib/apt/lists/* # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-17T21:17:37.240060716Z",
+            "created_by": "RUN /bin/sh -c locale-gen en_US.UTF-8 # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-17T21:17:37.287576073Z",
+            "created_by": "RUN /bin/sh -c rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-17T21:17:40.495055959Z",
+            "created_by": "RUN /bin/sh -c pip3 install websockify numpy # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:12:33.256545626Z",
+            "created_by": "COPY ansible /tmp/ansible # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:14:23.169200895Z",
+            "created_by": "RUN /bin/sh -c ansible-playbook /tmp/ansible/vnc-desktop.yml --connection=local -i localhost, # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:14:23.517383047Z",
+            "created_by": "RUN /bin/sh -c mkdir -p /opt/cursor/ansible && cp -r /tmp/ansible/* /opt/cursor/ansible/ && rm -rf /tmp/ansible # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:14:23.566071924Z",
+            "created_by": "RUN /bin/sh -c bash -c \"update-alternatives --set cc $(which clang)\" &&     bash -c \"update-alternatives --set c++ $(which clang++)\" # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:15:03.526012958Z",
+            "created_by": "WORKDIR /root",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:14:23.614897927Z",
+            "created_by": "RUN /bin/sh -c echo 'export PS1=\"\\[\\033[36m\\]\\\\W\\[\\033[0m\\] $ \"' > /root/.bashrc # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:14:23.616480602Z",
+            "created_by": "COPY universal/nvm-init.sh /usr/local/bin/ # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:14:23.663637596Z",
+            "created_by": "RUN /bin/sh -c chmod +x /usr/local/bin/nvm-init.sh # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:14:23.711298718Z",
+            "created_by": "RUN /bin/sh -c echo \"ubuntu ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/ubuntu &&     chmod 0440 /etc/sudoers.d/ubuntu &&     echo \"Defaults:ubuntu !lecture\" > /etc/sudoers.d/ubuntu-no-lecture &&     chmod 0440 /etc/sudoers.d/ubuntu-no-lecture &&     usermod -s /bin/bash ubuntu &&     mkdir -p /home/ubuntu &&     chown -R ubuntu:ubuntu /home/ubuntu &&     touch /home/ubuntu/.hushlogin # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:14:23.711298718Z",
+            "created_by": "USER ubuntu",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-24T07:15:03.526012958Z",
+            "created_by": "WORKDIR /home/ubuntu",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:14:24.070878121Z",
+            "created_by": "RUN /bin/sh -c git clone https://github.com/creationix/nvm.git .nvm &&     cd .nvm &&     git checkout v0.40.3 # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:14:32.545749668Z",
+            "created_by": "RUN /bin/sh -c curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash &&     sudo apt-get install -y git-lfs &&     sudo rm -f /etc/apt/sources.list.d/github_git-lfs.list &&     sudo rm -rf /var/lib/apt/lists/* # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:14:36.396387276Z",
+            "created_by": "RUN /bin/sh -c bash -c \"source /usr/local/bin/nvm-init.sh && nvm install 22.* && nvm alias default 22.*\" &&     bash -c \"source /usr/local/bin/nvm-init.sh && npm i -g yarn pnpm\" # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:14:36.463038004Z",
+            "created_by": "RUN /bin/sh -c echo 'export NVM_DIR=\"$HOME/.nvm\"' > /home/ubuntu/.bashrc &&     echo '[ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\"' >> /home/ubuntu/.bashrc &&     echo '[ -s \"$NVM_DIR/bash_completion\" ] && \\. \"$NVM_DIR/bash_completion\"' >> /home/ubuntu/.bashrc &&     echo 'export PS1=\"\\[\\033[36m\\]\\\\W\\[\\033[0m\\] $ \"' >> /home/ubuntu/.bashrc # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:14:36.463038004Z",
+            "created_by": "USER root",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-24T07:14:36.463038004Z",
+            "created_by": "ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin RUST_VERSION=1.83.0",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-24T07:14:45.654830642Z",
+            "created_by": "RUN /bin/sh -c curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |     sh -s -- -y --default-toolchain ${RUST_VERSION} &&     chmod -R a+w ${RUSTUP_HOME} ${CARGO_HOME} # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:14:45.654830642Z",
+            "created_by": "USER ubuntu",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-24T07:15:03.359875539Z",
+            "created_by": "RUN /bin/sh -c go install golang.org/x/tools/gopls@latest &&     go install honnef.co/go/tools/cmd/staticcheck@latest # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:15:03.524549271Z",
+            "created_by": "RUN /bin/sh -c echo 'export PATH=/usr/local/cargo/bin:$PATH' >> /home/ubuntu/.bashrc # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:15:03.524549271Z",
+            "created_by": "USER root",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-24T07:15:03.524549271Z",
+            "created_by": "ENV DISPLAY=:1",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-24T07:15:03.524549271Z",
+            "created_by": "ENV VNC_RESOLUTION=1920x1200x24",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-24T07:15:03.524549271Z",
+            "created_by": "ENV VNC_DPI=96",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-24T07:15:03.524549271Z",
+            "created_by": "EXPOSE [26058/tcp 5901/tcp]",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-24T07:15:03.524549271Z",
+            "created_by": "USER ubuntu",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-24T07:15:03.526012958Z",
+            "created_by": "WORKDIR /home/ubuntu",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2026-02-24T07:15:03.526012958Z",
+            "created_by": "SHELL [/bin/bash -c]",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2026-02-24T07:15:03.526012958Z",
+            "created_by": "CMD [\"/usr/local/share/desktop-init.sh\"]",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        }
+    ],
+    "os": "linux",
+    "rootfs": {
+        "type": "layers",
+        "diff_ids": [
+            "sha256:efafae78d70c98626c521c246827389128e7d7ea442db31bc433934647f0c791",
+            "sha256:156d445930c1085542a324afb34432d9ef21dc634be849190b089b4cc2e306ca",
+            "sha256:92a5c1f087146678f840721566d7d33a740891ad9ffd389933ffe47f8444d273",
+            "sha256:a557b097ad161c2af5952466731373e63087a5c8546bef918671685b09917afe",
+            "sha256:d5b2711d102f72eacbb8f45acf59db7d7d6e707fdfdcd79623f168c02c32b06e",
+            "sha256:fdac2d1c4114356a7e0745b5d180872f200f0b97ebd6d259c4cdb3f0f6242323",
+            "sha256:ccce0778acaa5d0b21e02156c2f796f20f8ac7602b8c1ae1a611e14f76d016c8",
+            "sha256:e5980330c04facc39d4096e840c3dbf90bcc493681dda1394d4b94d3437bd315",
+            "sha256:44ee48ba668e45bd0b031a5223c4c8f09fca19e263b49af8512b417f9dae7316",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+            "sha256:36964e87ba19fb8a9aaec0f9e9a7a353150ec40a45e94a51d24598a621e40b41",
+            "sha256:65f4947b627f120a1dca60c54593daf1f2a05304050e5995c4fc7db6e832b2d9",
+            "sha256:5d2f1521b6321c1aeadb1772b9ceb9960718c2d732229fbc926be9860957b1f3",
+            "sha256:cd8584adc4df890ba606ab92ec6c98e2d4ab428e7ebac9e0cf3c19784ff837a0",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+            "sha256:7434df42578efee46e7a4db4c9d2b84d42f9195a3ec39f6a2ce5f11f6e30703c",
+            "sha256:9367230009734d7739de3291c87d53e9d3f7c19cc9b5fc5a11bc1a476bc06b8b",
+            "sha256:a107e583a6f30e6e9d942cbb6dca5a0e1181b6345f5dbee283a48f40abfb2181",
+            "sha256:0396d5e1566c79885e1e1c1b7e11ef3adfc1ac486c767973355bb107008781bc",
+            "sha256:27fee3c6cb4cd2e0a76878f096649d0321be4e9780c98bfe1ba53019a7a786f2",
+            "sha256:c30de62efed0dba666849799c8bb397c458a961b4ea24054aa2f62da0a8ffa65",
+            "sha256:02fb835d610a61f32dae3e3fe9e254ceb3c1df456cf05f3f5abdde678d55b9bb",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+        ]
+    }
+}

@@ -1,0 +1,159 @@
+{
+    "architecture": "amd64",
+    "config": {
+        "ExposedPorts": {
+            "5900/tcp": {},
+            "6080/tcp": {}
+        },
+        "Env": [
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "DEBIAN_FRONTEND=noninteractive",
+            "DISPLAY=:99"
+        ],
+        "Cmd": [
+            "/usr/bin/supervisord",
+            "-c",
+            "/etc/supervisor/conf.d/supervisord.conf"
+        ],
+        "Labels": {
+            "org.opencontainers.image.ref.name": "ubuntu",
+            "org.opencontainers.image.version": "22.04"
+        },
+        "ArgsEscaped": true
+    },
+    "created": "2025-12-05T01:36:20.028065837Z",
+    "history": [
+        {
+            "created": "2025-10-13T17:23:18.028623466Z",
+            "created_by": "/bin/sh -c #(nop)  ARG RELEASE",
+            "empty_layer": true
+        },
+        {
+            "created": "2025-10-13T17:23:18.065921706Z",
+            "created_by": "/bin/sh -c #(nop)  ARG LAUNCHPAD_BUILD_ARCH",
+            "empty_layer": true
+        },
+        {
+            "created": "2025-10-13T17:23:18.102370355Z",
+            "created_by": "/bin/sh -c #(nop)  LABEL org.opencontainers.image.ref.name=ubuntu",
+            "empty_layer": true
+        },
+        {
+            "created": "2025-10-13T17:23:18.13507196Z",
+            "created_by": "/bin/sh -c #(nop)  LABEL org.opencontainers.image.version=22.04",
+            "empty_layer": true
+        },
+        {
+            "created": "2025-10-13T17:23:20.534472174Z",
+            "created_by": "/bin/sh -c #(nop) ADD file:d025507456f1d7d19195885b1c02a346454d60c9348cbd3be92431f2d7e2666e in / "
+        },
+        {
+            "created": "2025-10-13T17:23:20.919500115Z",
+            "created_by": "/bin/sh -c #(nop)  CMD [\"/bin/bash\"]",
+            "empty_layer": true
+        },
+        {
+            "created": "2025-12-05T01:36:00.627670019Z",
+            "created_by": "ENV DEBIAN_FRONTEND=noninteractive",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2025-12-05T01:36:00.627670019Z",
+            "created_by": "ENV DISPLAY=:99",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2025-12-05T01:36:00.627670019Z",
+            "created_by": "RUN /bin/sh -c apt-get update && apt-get install -y   xvfb   x11vnc   x11-utils   wget   gnupg   ca-certificates   fonts-liberation   libasound2   libatk-bridge2.0-0   libatk1.0-0   libatspi2.0-0   libcups2   libdbus-1-3   libdrm2   libgbm1   libgtk-3-0   libnspr4   libnss3   libwayland-client0   libxcomposite1   libxdamage1   libxfixes3   libxkbcommon0   libxrandr2   xdg-utils   libu2f-udev   libvulkan1   supervisor   python3   python3-pip   net-tools   procps   && rm -rf /var/lib/apt/lists/* # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2025-12-05T01:36:04.7104108Z",
+            "created_by": "RUN /bin/sh -c pip3 install websockify numpy # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2025-12-05T01:36:19.739872856Z",
+            "created_by": "RUN /bin/sh -c pip3 install playwright   && playwright install chromium   && playwright install-deps chromium # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2025-12-05T01:36:19.786441128Z",
+            "created_by": "RUN /bin/sh -c CHROMIUM_PATH=$(find /root/.cache/ms-playwright -name \"chrome\" -type f 2>/dev/null | head -n1) &&   echo \"$CHROMIUM_PATH\" > /usr/local/bin/chromium-path.txt &&   chmod 644 /usr/local/bin/chromium-path.txt # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2025-12-05T01:36:19.828692337Z",
+            "created_by": "RUN /bin/sh -c useradd -m -s /bin/bash chrome &&   mkdir -p /home/chrome/.vnc &&   chown -R chrome:chrome /home/chrome # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2025-12-05T01:36:19.88326814Z",
+            "created_by": "RUN /bin/sh -c mkdir -p /root/.vnc # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2025-12-05T01:36:19.935441738Z",
+            "created_by": "RUN /bin/sh -c x11vnc -storepasswd chrome /root/.vnc/passwd # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2025-12-05T01:36:19.977482947Z",
+            "created_by": "RUN /bin/sh -c mkdir -p /var/log/supervisor # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2025-12-05T01:36:19.979075713Z",
+            "created_by": "COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2025-12-05T01:36:19.980522876Z",
+            "created_by": "COPY start-chrome.sh /usr/local/bin/start-chrome.sh # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2025-12-05T01:36:19.981935302Z",
+            "created_by": "COPY start-x11vnc.sh /usr/local/bin/start-x11vnc.sh # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2025-12-05T01:36:20.028065837Z",
+            "created_by": "RUN /bin/sh -c chmod +x /usr/local/bin/start-chrome.sh /usr/local/bin/start-x11vnc.sh # buildkit",
+            "comment": "buildkit.dockerfile.v0"
+        },
+        {
+            "created": "2025-12-05T01:36:20.028065837Z",
+            "created_by": "EXPOSE [5900/tcp 6080/tcp]",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        },
+        {
+            "created": "2025-12-05T01:36:20.028065837Z",
+            "created_by": "CMD [\"/usr/bin/supervisord\" \"-c\" \"/etc/supervisor/conf.d/supervisord.conf\"]",
+            "comment": "buildkit.dockerfile.v0",
+            "empty_layer": true
+        }
+    ],
+    "os": "linux",
+    "rootfs": {
+        "type": "layers",
+        "diff_ids": [
+            "sha256:73974f74b436f39a2fdb6461b1e3f7c3e41c73325776fa71d16b942a5b4a365b",
+            "sha256:c4f788555788926bc55594561f852e1226d8cd656ee88e6d744fcb78cb44c80f",
+            "sha256:524a5c62198990f74a9afc90af371bafb75dbecd87245f62b2b5ad6c583f9504",
+            "sha256:319add6f25081733bc304f41a27930fc4f5624fee400fdc61085942188601dc8",
+            "sha256:08efee63b4862883af11e9a8636506d6c243490bf902d465725cddfed11c834f",
+            "sha256:cebe8f13263e5a17b77838c21eb4ad73ac66d1fc7fbf068ea1c5a34f10379fef",
+            "sha256:8d0f02342b1789fc0b3cd47bffac049211688eef095cc17fb3bc494c968e6aee",
+            "sha256:9f2c8a184beb4d03f1802a75bdc28134d5b6dd1ebda88c2a6e532d4a694ba8b1",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+            "sha256:b6b56233e548ef8cd08bd0f80cd7c5c673fa6bd6549dbb3ae03ea6d576db5945",
+            "sha256:6cf4585b44991c57b04e671722a177a75625f014554148b0949df51161f97eb3",
+            "sha256:b2bf6838e2c08a05fb1d0cccac98181eb6ef7e3819e6d081f98fd8f86b4604ec",
+            "sha256:d35a77796141a91c70cf0ae42f88931780ce51340b61db3cb2a305fbfa5dce0a"
+        ]
+    }
+}
