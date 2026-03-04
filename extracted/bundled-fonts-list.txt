@@ -1,0 +1,10 @@
+total 18416
+drwxr-xr-x 2 root root    4096 Feb 24 07:14 .
+drwxr-xr-x 5 root root    4096 Feb 24 07:14 ..
+-rw-r--r-- 1 root root 1153400 Feb 24 07:14 Courier.ttc
+-rw-r--r-- 1 root root 4472724 Feb 24 07:14 Helvetica.ttc
+-rw-r--r-- 1 root root 3202372 Feb 24 07:14 LucidaGrande.ttc
+-rw-r--r-- 1 root root  534216 Feb 24 07:14 Monaco.ttf
+-rw-r--r-- 1 root root  223892 Feb 24 07:14 SanFranciscoMono.ttf
+-rw-r--r-- 1 root root 8333964 Feb 24 07:14 SanFrancisco.ttf
+-rw-r--r-- 1 root root  919104 Feb 24 07:14 Times.ttc
