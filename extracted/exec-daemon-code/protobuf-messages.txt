@@ -1,0 +1,990 @@
+================================================================================
+PROTOBUF MESSAGE DEFINITIONS EXTRACTED FROM /exec-daemon/index.js
+================================================================================
+Source: Cursor exec-daemon bundled JavaScript (~380K lines)
+Proto packages: agent.v1, aiserver.v1
+Total protobuf messages in file: ~2107 (static typeName occurrences)
+Extraction scope: Key messages for agent architecture understanding
+================================================================================
+
+
+################################################################################
+# SECTION 1: AGENT RUN REQUEST (The top-level request message)
+################################################################################
+
+--- agent.v1.AgentRunRequest (lines 211005-211106) ---
+typeName = "agent.v1.AgentRunRequest"
+fields = [
+    { no: 1,  name: "conversation_state",         kind: "message", T: ConversationStateStructure },
+    { no: 2,  name: "action",                     kind: "message", T: ConversationAction },
+    { no: 3,  name: "model_details",              kind: "message", T: ModelDetails },
+    { no: 9,  name: "requested_model",            kind: "message", T: RequestedModel, opt: true },
+    { no: 4,  name: "mcp_tools",                  kind: "message", T: McpTools },
+    { no: 5,  name: "conversation_id",            kind: "scalar",  T: STRING, opt: true },
+    { no: 6,  name: "mcp_file_system_options",    kind: "message", T: McpFileSystemOptions, opt: true },
+    { no: 7,  name: "skill_options",              kind: "message", T: SkillOptions, opt: true },
+    { no: 8,  name: "custom_system_prompt",       kind: "scalar",  T: STRING, opt: true },
+    { no: 10, name: "suggest_next_prompt",        kind: "scalar",  T: BOOL, opt: true },
+    { no: 11, name: "subagent_type_name",         kind: "scalar",  T: STRING, opt: true },
+    { no: 12, name: "exclude_workspace_context",  kind: "scalar",  T: BOOL, opt: true },
+]
+Notes:
+  - conversation_state: The full serialized state (blob-based structure)
+  - action: What triggered this run (user message, resume, cancel, etc.)
+  - model_details: Legacy model config (being replaced by requested_model)
+  - custom_system_prompt: Allowlisted for specific teams only
+  - subagent_type_name: For client-side subagents (e.g. "coordinator-agent", "explore")
+  - exclude_workspace_context: Strips rules, skills, transcripts, notes, terminal files
+
+
+################################################################################
+# SECTION 2: CONVERSATION STATE
+################################################################################
+
+--- agent.v1.ConversationState (lines 210416-210484) ---
+typeName = "agent.v1.ConversationState"
+fields = [
+    { no: 1,  name: "root_prompt_messages_json",  kind: "scalar",  T: STRING, repeated: true },
+    { no: 8,  name: "turns",                      kind: "message", T: ConversationTurn, repeated: true },
+    { no: 3,  name: "todos",                      kind: "message", T: TodoItem, repeated: true },
+    { no: 4,  name: "pending_tool_calls",         kind: "scalar",  T: STRING, repeated: true },
+    { no: 5,  name: "token_details",              kind: "message", T: ConversationTokenDetails },
+    { no: 6,  name: "summary",                    kind: "message", T: ConversationSummary, opt: true },
+    { no: 7,  name: "plan",                       kind: "message", T: ConversationPlan, opt: true },
+    { no: 9,  name: "summary_archive",            kind: "message", T: ConversationSummaryArchive, opt: true },  // DEPRECATED
+    { no: 10, name: "file_states",                kind: "map",     K: STRING, V: { kind: "message", T: FileState } },
+    { no: 11, name: "summary_archives",           kind: "message", T: ConversationSummaryArchive, repeated: true },
+]
+Notes:
+  - pending_tool_calls: Raw JSON stringified tool-call content parts awaiting execution
+  - summary: Only for when user explicitly asks for a summary through the summary action
+  - file_states: Map of file paths to their latest content
+
+
+--- agent.v1.ConversationStateStructure (lines 210551-210675) ---
+typeName = "agent.v1.ConversationStateStructure"
+fields = [
+    { no: 2,  name: "turns_old",                  kind: "scalar",  T: BYTES, repeated: true },  // DEPRECATED
+    { no: 1,  name: "root_prompt_messages_json",  kind: "scalar",  T: BYTES, repeated: true },
+    { no: 8,  name: "turns",                      kind: "scalar",  T: BYTES, repeated: true },
+    { no: 3,  name: "todos",                      kind: "scalar",  T: BYTES, repeated: true },
+    { no: 4,  name: "pending_tool_calls",         kind: "scalar",  T: STRING, repeated: true },
+    { no: 5,  name: "token_details",              kind: "message", T: ConversationTokenDetails },
+    { no: 6,  name: "summary",                    kind: "scalar",  T: BYTES, opt: true },
+    { no: 7,  name: "plan",                       kind: "scalar",  T: BYTES, opt: true },
+    { no: 9,  name: "previous_workspace_uris",    kind: "scalar",  T: STRING, repeated: true },
+    { no: 10, name: "mode",                       kind: "enum",    T: AgentMode, opt: true },
+    { no: 11, name: "summary_archive",            kind: "scalar",  T: BYTES, opt: true },  // DEPRECATED
+    { no: 12, name: "file_states",                kind: "map",     K: STRING, V: { kind: "scalar", T: BYTES } },  // DEPRECATED
+    { no: 15, name: "file_states_v2",             kind: "map",     K: STRING, V: { kind: "message", T: FileStateStructure } },
+    { no: 13, name: "summary_archives",           kind: "scalar",  T: BYTES, repeated: true },
+    { no: 14, name: "turn_timings",               kind: "message", T: StepTiming, repeated: true },
+    { no: 16, name: "subagent_states",            kind: "map",     K: STRING, V: { kind: "message", T: SubagentPersistedState } },
+    { no: 17, name: "self_summary_count",         kind: "scalar",  T: UINT32 },
+    { no: 18, name: "read_paths",                 kind: "scalar",  T: STRING, repeated: true },
+]
+Notes:
+  - This is the blob-based version of ConversationState (turns stored as serialized bytes)
+  - file_states_v2: Map of file paths to FileStateStructure (replaces file_states)
+  - subagent_states: Map of subagent ID to persisted subagent state
+  - read_paths: Set of file paths read during conversation
+  - mode: Current AgentMode (AGENT, ASK, PLAN, DEBUG, TRIAGE, PROJECT)
+
+
+--- agent.v1.FileStateStructure (lines 210344-210367) ---
+typeName = "agent.v1.FileStateStructure"
+fields = [
+    { no: 1, name: "content",         kind: "scalar", T: BYTES, opt: true },
+    { no: 2, name: "initial_content", kind: "scalar", T: BYTES, opt: true },
+]
+
+--- agent.v1.StepTiming (lines 210384-210402) ---
+typeName = "agent.v1.StepTiming"
+fields = [
+    { no: 1, name: "duration_ms",  kind: "scalar", T: UINT64 },
+    { no: 2, name: "timestamp_ms", kind: "scalar", T: UINT64 },
+]
+
+
+################################################################################
+# SECTION 3: REQUEST CONTEXT (Client environment sent on each action)
+################################################################################
+
+--- agent.v1.RequestContext (lines 220974-221172) ---
+typeName = "agent.v1.RequestContext"
+fields = [
+    { no: 2,  name: "rules",                             kind: "message", T: CursorRule, repeated: true },
+    { no: 4,  name: "env",                               kind: "message", T: RequestContextEnv },
+    { no: 6,  name: "repository_info",                   kind: "message", T: RepositoryIndexingInfo, repeated: true },
+    { no: 7,  name: "tools",                             kind: "message", T: McpToolDefinition, repeated: true },
+    { no: 8,  name: "conversation_notes_listing",        kind: "scalar",  T: STRING, opt: true },
+    { no: 9,  name: "shared_notes_listing",              kind: "scalar",  T: STRING, opt: true },
+    { no: 11, name: "git_repos",                         kind: "message", T: GitRepoInfo, repeated: true },
+    { no: 13, name: "project_layouts",                   kind: "message", T: LsDirectoryTreeNode, repeated: true },
+    { no: 14, name: "mcp_instructions",                  kind: "message", T: McpInstructions, repeated: true },
+    { no: 15, name: "debug_mode_config",                 kind: "message", T: DebugModeConfig, opt: true },
+    { no: 16, name: "cloud_rule",                        kind: "scalar",  T: STRING, opt: true },
+    { no: 17, name: "web_search_enabled",                kind: "scalar",  T: BOOL, opt: true },
+    { no: 18, name: "skill_options",                     kind: "message", T: SkillOptions, opt: true },
+    { no: 19, name: "repository_info_should_query_prod", kind: "scalar",  T: BOOL, opt: true },
+    { no: 20, name: "file_contents",                     kind: "map",     K: STRING, V: { kind: "scalar", T: STRING } },
+    { no: 21, name: "user_intent_summary",               kind: "scalar",  T: STRING, opt: true },
+    { no: 22, name: "custom_subagents",                  kind: "message", T: CustomSubagent, repeated: true },
+    { no: 23, name: "mcp_file_system_options",           kind: "message", T: McpFileSystemOptions, opt: true },
+    { no: 24, name: "web_fetch_enabled",                 kind: "scalar",  T: BOOL, opt: true },
+    { no: 25, name: "hooks_additional_context",          kind: "scalar",  T: STRING, opt: true },
+    { no: 26, name: "commit_attribution_message",        kind: "scalar",  T: STRING, opt: true },
+    { no: 27, name: "pr_attribution_message",            kind: "scalar",  T: STRING, opt: true },
+    { no: 28, name: "hooks_config",                      kind: "message", T: HooksConfigInfo, opt: true },
+    { no: 29, name: "agent_skills",                      kind: "message", T: AgentSkill, repeated: true },
+    { no: 30, name: "precomputed_human_changes",         kind: "message", T: PrecomputedHumanChange, repeated: true },
+    { no: 31, name: "recently_added_plugin",             kind: "message", T: RecentlyAddedPlugin, opt: true },
+    { no: 32, name: "supports_mcp_auth",                 kind: "scalar",  T: BOOL, opt: true },
+    { no: 33, name: "git_repo_info_complete",            kind: "scalar",  T: BOOL, opt: true },
+    { no: 34, name: "mcp_meta_tool_options",             kind: "message", T: McpMetaToolOptions, opt: true },
+    { no: 35, name: "read_lints_enabled",                kind: "scalar",  T: BOOL, opt: true },
+]
+Notes:
+  - user_intent_summary: Content of the user-intent/index.md file summarizing past conversations
+  - hooks_additional_context: Additional context injected from sessionStart hooks
+  - mcp_meta_tool_options: Client-side opt-in for MCP meta-tool discovery mode
+  - read_lints_enabled: Defaults to true when unset; false for glass local agents
+
+
+--- agent.v1.RequestContextEnv (lines 220537-220648) ---
+typeName = "agent.v1.RequestContextEnv"
+fields = [
+    { no: 1,  name: "os_version",                        kind: "scalar", T: STRING },
+    { no: 2,  name: "workspace_paths",                   kind: "scalar", T: STRING, repeated: true },
+    { no: 3,  name: "shell",                             kind: "scalar", T: STRING },
+    { no: 5,  name: "sandbox_enabled",                   kind: "scalar", T: BOOL },
+    { no: 7,  name: "terminals_folder",                  kind: "scalar", T: STRING },
+    { no: 8,  name: "agent_shared_notes_folder",         kind: "scalar", T: STRING },
+    { no: 9,  name: "agent_conversation_notes_folder",   kind: "scalar", T: STRING },
+    { no: 10, name: "time_zone",                         kind: "scalar", T: STRING },
+    { no: 11, name: "project_folder",                    kind: "scalar", T: STRING },
+    { no: 12, name: "agent_transcripts_folder",          kind: "scalar", T: STRING },
+    { no: 13, name: "artifacts_folder",                  kind: "scalar", T: STRING, opt: true },
+    { no: 14, name: "sandbox_supported",                 kind: "scalar", T: BOOL, opt: true },
+    { no: 16, name: "sandbox_network_has_defaults",      kind: "scalar", T: BOOL, opt: true },
+    { no: 17, name: "sandbox_network_explicit_allowlist", kind: "scalar", T: STRING, repeated: true },
+    { no: 18, name: "secret_redaction_enabled",          kind: "scalar", T: BOOL, opt: true },
+]
+Notes:
+  - project_folder: Computed client-side as ~/.cursor/projects/{slug}/
+  - artifacts_folder: Set by cloud agents to /opt/cursor/artifacts/, unset for local
+  - sandbox_supported: Whether environment supports sandbox (distinct from sandbox_enabled)
+  - sandbox_network_has_defaults: When true AND sandbox enabled, standard network ops work
+  - sandbox_network_explicit_allowlist: Domain patterns allowed through sandbox
+  - secret_redaction_enabled: When true, read tool prefers redacted read executor path
+
+
+--- agent.v1.RequestContextArgs (lines 220244-220262) ---
+typeName = "agent.v1.RequestContextArgs"
+fields = [
+    { no: 2, name: "notes_session_id", kind: "scalar", T: STRING, opt: true },
+    { no: 3, name: "workspace_id",     kind: "scalar", T: STRING, opt: true },
+]
+
+--- agent.v1.RequestContextResult (lines 220279-220294) ---
+typeName = "agent.v1.RequestContextResult"
+fields = [
+    { no: 1, name: "success",  kind: "message", T: RequestContextSuccess, oneof: "result" },
+    { no: 2, name: "error",    kind: "message", T: RequestContextError, oneof: "result" },
+    { no: 3, name: "rejected", kind: "message", T: RequestContextRejected, oneof: "result" },
+]
+
+--- agent.v1.RequestContextSuccess ---
+fields = [
+    { no: 1, name: "request_context", kind: "message", T: RequestContext },
+]
+
+--- agent.v1.RequestContextError ---
+fields = [
+    { no: 1, name: "error", kind: "scalar", T: STRING },
+]
+
+--- agent.v1.RequestContextRejected ---
+fields = [
+    { no: 1, name: "reason", kind: "scalar", T: STRING },
+]
+
+
+################################################################################
+# SECTION 4: CONVERSATION TURNS & STEPS
+################################################################################
+
+--- agent.v1.ConversationTurn (lines 209948-209962) ---
+typeName = "agent.v1.ConversationTurn"
+fields = [
+    { no: 1, name: "agent_conversation_turn", kind: "message", T: AgentConversationTurn, oneof: "turn" },
+    { no: 2, name: "shell_conversation_turn", kind: "message", T: ShellConversationTurn, oneof: "turn" },
+]
+
+--- agent.v1.ConversationTurnStructure (lines 210009-210023) ---
+typeName = "agent.v1.ConversationTurnStructure"
+fields = [
+    { no: 1, name: "agent_conversation_turn", kind: "message", T: AgentConversationTurnStructure, oneof: "turn" },
+    { no: 2, name: "shell_conversation_turn", kind: "message", T: ShellConversationTurnStructure, oneof: "turn" },
+]
+
+--- agent.v1.AgentConversationTurn (lines 210040-210065) ---
+typeName = "agent.v1.AgentConversationTurn"
+fields = [
+    { no: 1, name: "user_message", kind: "message", T: UserMessage },
+    { no: 2, name: "steps",        kind: "message", T: ConversationStep, repeated: true },
+    { no: 3, name: "request_id",   kind: "scalar",  T: STRING, opt: true },
+]
+Notes: request_id is for analytics tracking
+
+--- agent.v1.AgentConversationTurnStructure (lines 210082-210107) ---
+typeName = "agent.v1.AgentConversationTurnStructure"
+fields = [
+    { no: 1, name: "user_message", kind: "scalar", T: BYTES },
+    { no: 2, name: "steps",        kind: "scalar", T: BYTES, repeated: true },
+    { no: 3, name: "request_id",   kind: "scalar", T: STRING, opt: true },
+]
+
+--- agent.v1.ShellConversationTurn (lines 210124-210142) ---
+typeName = "agent.v1.ShellConversationTurn"
+fields = [
+    { no: 1, name: "shell_command", kind: "message", T: ShellCommand },
+    { no: 2, name: "shell_output",  kind: "message", T: ShellOutput },
+]
+
+--- agent.v1.ShellConversationTurnStructure (lines 210159-210177) ---
+typeName = "agent.v1.ShellConversationTurnStructure"
+fields = [
+    { no: 1, name: "shell_command", kind: "scalar", T: BYTES },
+    { no: 2, name: "shell_output",  kind: "scalar", T: BYTES },
+]
+
+--- agent.v1.ConversationStep (lines 209183-209198) ---
+typeName = "agent.v1.ConversationStep"
+fields = [
+    { no: 1, name: "assistant_message", kind: "message", T: AssistantMessage, oneof: "message" },
+    { no: 2, name: "tool_call",         kind: "message", T: ToolCall, oneof: "message" },
+    { no: 3, name: "thinking_message",  kind: "message", T: ThinkingMessage, oneof: "message" },
+]
+
+
+################################################################################
+# SECTION 5: TOOL CALL / TOOL CALL DELTA (The master union types)
+################################################################################
+
+--- agent.v1.ToolCall (lines 208931-208981) ---
+typeName = "agent.v1.ToolCall"
+fields = [   // oneof "tool"
+    { no: 1,  name: "shell_tool_call",                  kind: "message", T: ShellToolCall, oneof: "tool" },
+    { no: 3,  name: "delete_tool_call",                 kind: "message", T: DeleteToolCall, oneof: "tool" },
+    { no: 4,  name: "glob_tool_call",                   kind: "message", T: GlobToolCall, oneof: "tool" },
+    { no: 5,  name: "grep_tool_call",                   kind: "message", T: GrepToolCall, oneof: "tool" },
+    { no: 8,  name: "read_tool_call",                   kind: "message", T: ReadToolCall, oneof: "tool" },
+    { no: 9,  name: "update_todos_tool_call",           kind: "message", T: UpdateTodosToolCall, oneof: "tool" },
+    { no: 10, name: "read_todos_tool_call",             kind: "message", T: ReadTodosToolCall, oneof: "tool" },
+    { no: 12, name: "edit_tool_call",                   kind: "message", T: EditToolCall, oneof: "tool" },
+    { no: 13, name: "ls_tool_call",                     kind: "message", T: LsToolCall, oneof: "tool" },
+    { no: 14, name: "read_lints_tool_call",             kind: "message", T: ReadLintsToolCall, oneof: "tool" },
+    { no: 15, name: "mcp_tool_call",                    kind: "message", T: McpToolCall, oneof: "tool" },
+    { no: 16, name: "sem_search_tool_call",             kind: "message", T: SemSearchToolCall, oneof: "tool" },
+    { no: 17, name: "create_plan_tool_call",            kind: "message", T: CreatePlanToolCall, oneof: "tool" },
+    { no: 18, name: "web_search_tool_call",             kind: "message", T: WebSearchToolCall, oneof: "tool" },
+    { no: 19, name: "task_tool_call",                   kind: "message", T: TaskToolCall, oneof: "tool" },
+    { no: 20, name: "list_mcp_resources_tool_call",     kind: "message", T: ListMcpResourcesToolCall, oneof: "tool" },
+    { no: 21, name: "read_mcp_resource_tool_call",      kind: "message", T: ReadMcpResourceToolCall, oneof: "tool" },
+    { no: 22, name: "apply_agent_diff_tool_call",       kind: "message", T: ApplyAgentDiffToolCall, oneof: "tool" },
+    { no: 23, name: "ask_question_tool_call",           kind: "message", T: AskQuestionToolCall, oneof: "tool" },
+    { no: 24, name: "fetch_tool_call",                  kind: "message", T: FetchToolCall, oneof: "tool" },
+    { no: 25, name: "switch_mode_tool_call",            kind: "message", T: SwitchModeToolCall, oneof: "tool" },
+    { no: 28, name: "generate_image_tool_call",         kind: "message", T: GenerateImageToolCall, oneof: "tool" },
+    { no: 29, name: "record_screen_tool_call",          kind: "message", T: RecordScreenToolCall, oneof: "tool" },
+    { no: 30, name: "computer_use_tool_call",           kind: "message", T: ComputerUseToolCall, oneof: "tool" },
+    { no: 31, name: "write_shell_stdin_tool_call",      kind: "message", T: WriteShellStdinToolCall, oneof: "tool" },
+    { no: 32, name: "reflect_tool_call",                kind: "message", T: ReflectToolCall, oneof: "tool" },
+    { no: 33, name: "setup_vm_environment_tool_call",   kind: "message", T: SetupVmEnvironmentToolCall, oneof: "tool" },
+    { no: 34, name: "truncated_tool_call",              kind: "message", T: TruncatedToolCall, oneof: "tool" },
+    { no: 35, name: "start_grind_execution_tool_call",  kind: "message", T: StartGrindExecutionToolCall, oneof: "tool" },
+    { no: 36, name: "start_grind_planning_tool_call",   kind: "message", T: StartGrindPlanningToolCall, oneof: "tool" },
+    { no: 37, name: "web_fetch_tool_call",              kind: "message", T: WebFetchToolCall, oneof: "tool" },
+    { no: 38, name: "report_bugfix_results_tool_call",  kind: "message", T: ReportBugfixResultsToolCall, oneof: "tool" },
+    { no: 39, name: "ai_attribution_tool_call",         kind: "message", T: AiAttributionToolCall, oneof: "tool" },
+    { no: 40, name: "pr_management_tool_call",          kind: "message", T: PrManagementToolCall, oneof: "tool" },
+    { no: 41, name: "mcp_auth_tool_call",               kind: "message", T: McpAuthToolCall, oneof: "tool" },
+    { no: 42, name: "await_tool_call",                  kind: "message", T: AwaitToolCall, oneof: "tool" },
+    { no: 43, name: "blame_by_file_path_tool_call",     kind: "message", T: BlameByFilePathToolCall, oneof: "tool" },
+    { no: 44, name: "get_mcp_tools_tool_call",          kind: "message", T: GetMcpToolsToolCall, oneof: "tool" },
+]
+Notes:
+  - 37 tool call types in the oneof union
+  - Numbers 2, 6, 7, 11, 26, 27 are skipped (likely deprecated/removed)
+  - truncated_tool_call (no: 34): Used for context window management
+
+--- agent.v1.TruncatedToolCall (lines 209109-209134) ---
+typeName = "agent.v1.TruncatedToolCall"
+fields = [
+    { no: 1, name: "original_step_blob_id", kind: "scalar",  T: BYTES },
+    { no: 2, name: "args",                  kind: "message", T: TruncatedToolCallArgs },
+    { no: 3, name: "result",                kind: "message", T: TruncatedToolCallResult },
+]
+
+--- agent.v1.ToolCallDelta (lines 209151-209166) ---
+typeName = "agent.v1.ToolCallDelta"
+fields = [   // oneof "delta"
+    { no: 1, name: "shell_tool_call_delta", kind: "message", T: ShellToolCallDelta, oneof: "delta" },
+    { no: 2, name: "task_tool_call_delta",  kind: "message", T: TaskToolCallDelta, oneof: "delta" },
+    { no: 3, name: "edit_tool_call_delta",  kind: "message", T: EditToolCallDelta, oneof: "delta" },
+]
+
+--- agent.v1.ToolCallDeltaUpdate (lines 211225-211250) ---
+typeName = "agent.v1.ToolCallDeltaUpdate"
+fields = [
+    { no: 1, name: "call_id",         kind: "scalar",  T: STRING },
+    { no: 2, name: "tool_call_delta", kind: "message", T: ToolCallDelta },
+    { no: 3, name: "model_call_id",   kind: "scalar",  T: STRING },
+]
+Notes: model_call_id groups tool calls from the same model provider call
+
+
+################################################################################
+# SECTION 6: CONVERSATION ACTION (What triggers an agent run)
+################################################################################
+
+--- agent.v1.ConversationAction (lines 209215-209245) ---
+typeName = "agent.v1.ConversationAction"
+fields = [   // oneof "action"
+    { no: 1,  name: "user_message_action",                     kind: "message", T: UserMessageAction, oneof: "action" },
+    { no: 2,  name: "resume_action",                           kind: "message", T: ResumeAction, oneof: "action" },
+    { no: 3,  name: "cancel_action",                           kind: "message", T: CancelAction, oneof: "action" },
+    { no: 4,  name: "summarize_action",                        kind: "message", T: SummarizeAction, oneof: "action" },
+    { no: 5,  name: "shell_command_action",                    kind: "message", T: ShellCommandAction, oneof: "action" },
+    { no: 6,  name: "start_plan_action",                       kind: "message", T: StartPlanAction, oneof: "action" },
+    { no: 7,  name: "execute_plan_action",                     kind: "message", T: ExecutePlanAction, oneof: "action" },
+    { no: 8,  name: "async_ask_question_completion_action",    kind: "message", T: AsyncAskQuestionCompletionAction, oneof: "action" },
+    { no: 10, name: "cancel_subagent_action",                  kind: "message", T: CancelSubagentAction, oneof: "action" },
+    { no: 12, name: "background_task_completion_action",       kind: "message", T: BackgroundTaskCompletionAction, oneof: "action" },
+    { no: 13, name: "background_shell_action",                 kind: "message", T: BackgroundShellAction, oneof: "action" },
+    // Additional field (not oneof):
+    { no: 11, name: "triggering_auth_id",                      kind: "scalar",  T: STRING, opt: true },
+]
+Notes: triggering_auth_id is for co-author attribution and logging
+
+--- Action Subtypes ---
+
+agent.v1.UserMessageAction:
+fields = [
+    { no: 1, name: "user_message",                 kind: "message", T: UserMessage },
+    { no: 2, name: "request_context",              kind: "message", T: RequestContext },
+    { no: 3, name: "send_to_interaction_listener", kind: "scalar",  T: BOOL, opt: true },
+    { no: 4, name: "prepend_user_messages",        kind: "message", T: UserMessage, repeated: true },
+]
+Notes: prepend_user_messages for rapid-fire handling (messages submitted before current one)
+
+agent.v1.ResumeAction:
+fields = [
+    { no: 2, name: "request_context", kind: "message", T: RequestContext },
+]
+
+agent.v1.CancelAction:
+fields = [
+    { no: 1, name: "reason", kind: "scalar", T: STRING },
+]
+
+agent.v1.SummarizeAction:
+fields = []  // empty
+
+agent.v1.ShellCommandAction:
+fields = [
+    { no: 1, name: "shell_command", kind: "message", T: ShellCommand },
+    { no: 2, name: "exec_id",      kind: "scalar",  T: STRING },
+]
+
+agent.v1.StartPlanAction:
+fields = [
+    { no: 1, name: "user_message",    kind: "message", T: UserMessage },
+    { no: 2, name: "request_context", kind: "message", T: RequestContext },
+    { no: 3, name: "is_spec",         kind: "scalar",  T: BOOL },
+]
+
+agent.v1.ExecutePlanAction:
+fields = [
+    { no: 1, name: "request_context",    kind: "message", T: RequestContext },
+    { no: 2, name: "plan",               kind: "message", T: ConversationPlan, opt: true },
+    { no: 3, name: "plan_file_uri",      kind: "scalar",  T: STRING, opt: true },
+    { no: 4, name: "plan_file_content",  kind: "scalar",  T: STRING, opt: true },
+    { no: 5, name: "execution_mode",     kind: "enum",    T: AgentMode },
+    { no: 6, name: "kickoff_message_id", kind: "scalar",  T: STRING, opt: true },
+]
+Notes: plan_file_uri e.g. "cursor-plan://composerId/plan.md"
+
+agent.v1.AsyncAskQuestionCompletionAction:
+fields = [
+    { no: 1, name: "original_tool_call_id", kind: "scalar",  T: STRING },
+    { no: 2, name: "original_args",         kind: "message", T: AskQuestionArgs },
+    { no: 3, name: "result",                kind: "message", T: AskQuestionResult },
+]
+
+agent.v1.CancelSubagentAction:
+fields = [
+    { no: 1, name: "subagent_id", kind: "scalar", T: STRING },
+]
+
+agent.v1.BackgroundTaskCompletionAction:
+fields = [
+    { no: 1, name: "completions", kind: "message", T: BackgroundTaskCompletion, repeated: true },
+]
+
+agent.v1.BackgroundTaskCompletion:
+fields = [
+    { no: 1, name: "task_id",     kind: "scalar", T: STRING },
+    { no: 2, name: "kind",        kind: "enum",   T: BackgroundTaskKind },
+    { no: 3, name: "status",      kind: "enum",   T: BackgroundTaskStatus },
+    { no: 4, name: "title",       kind: "scalar", T: STRING },
+    { no: 5, name: "detail",      kind: "scalar", T: STRING, opt: true },
+    { no: 6, name: "output_path", kind: "scalar", T: STRING, opt: true },
+]
+
+agent.v1.BackgroundShellAction:
+fields = [
+    { no: 1, name: "tool_call_id", kind: "scalar", T: STRING },
+]
+
+
+################################################################################
+# SECTION 7: MODEL DETAILS / REQUESTED MODEL
+################################################################################
+
+--- agent.v1.ModelDetails (lines 210838-210890) ---
+typeName = "agent.v1.ModelDetails"
+fields = [
+    { no: 1,  name: "model_id",           kind: "scalar",  T: STRING },
+    { no: 3,  name: "display_model_id",   kind: "scalar",  T: STRING },
+    { no: 4,  name: "display_name",       kind: "scalar",  T: STRING },
+    { no: 5,  name: "display_name_short", kind: "scalar",  T: STRING },
+    { no: 6,  name: "aliases",            kind: "scalar",  T: STRING, repeated: true },
+    { no: 2,  name: "thinking_details",   kind: "message", T: ThinkingDetails, opt: true },
+    { no: 7,  name: "max_mode",           kind: "scalar",  T: BOOL, opt: true },
+    // oneof "credentials":
+    { no: 8,  name: "api_key_credentials",  kind: "message", T: ApiKeyCredentials, oneof: "credentials" },
+    { no: 9,  name: "azure_credentials",    kind: "message", T: AzureCredentials, oneof: "credentials" },
+    { no: 10, name: "bedrock_credentials",  kind: "message", T: BedrockCredentials, oneof: "credentials" },
+]
+
+--- agent.v1.RequestedModel (lines 210907-210953) ---
+typeName = "agent.v1.RequestedModel"
+fields = [
+    { no: 1, name: "model_id",                          kind: "scalar",  T: STRING },
+    { no: 2, name: "max_mode",                          kind: "scalar",  T: BOOL },
+    { no: 3, name: "parameters",                        kind: "message", T: RequestedModel_ModelParameterValue, repeated: true },
+    // oneof "credentials":
+    { no: 4, name: "api_key_credentials",               kind: "message", T: ApiKeyCredentials, oneof: "credentials" },
+    { no: 5, name: "azure_credentials",                 kind: "message", T: AzureCredentials, oneof: "credentials" },
+    { no: 6, name: "bedrock_credentials",               kind: "message", T: BedrockCredentials, oneof: "credentials" },
+    { no: 7, name: "built_in_model",                    kind: "scalar",  T: BOOL },
+    { no: 8, name: "is_variant_string_representation",  kind: "scalar",  T: BOOL },
+]
+
+--- agent.v1.RequestedModel.ModelParameterValue (lines 210970-210991) ---
+typeName = "agent.v1.RequestedModel.ModelParameterValue"
+fields = [
+    { no: 1, name: "id",    kind: "scalar", T: STRING },
+    { no: 2, name: "value", kind: "scalar", T: STRING },
+]
+Notes: All parameters encoded as strings. Boolean = "true"/"false", enum = value name.
+
+--- agent.v1.ThinkingDetails ---
+typeName = "agent.v1.ThinkingDetails"
+fields = []  // empty marker message
+
+
+################################################################################
+# SECTION 8: MCP TOOLS / SKILL OPTIONS
+################################################################################
+
+--- agent.v1.McpToolDefinition (lines 218697-218730) ---
+typeName = "agent.v1.McpToolDefinition"
+fields = [
+    { no: 1, name: "name",                kind: "scalar",  T: STRING },
+    { no: 4, name: "provider_identifier", kind: "scalar",  T: STRING },
+    { no: 5, name: "tool_name",           kind: "scalar",  T: STRING },
+    { no: 2, name: "description",         kind: "scalar",  T: STRING },
+    { no: 3, name: "input_schema",        kind: "message", T: google.protobuf.Value },
+]
+
+--- agent.v1.McpTools (lines 218747-218760) ---
+typeName = "agent.v1.McpTools"
+fields = [
+    { no: 1, name: "mcp_tools", kind: "message", T: McpToolDefinition, repeated: true },
+]
+
+--- agent.v1.McpToolDescriptor (lines 218880-218912) ---
+typeName = "agent.v1.McpToolDescriptor"
+fields = [
+    { no: 1, name: "tool_name",       kind: "scalar",  T: STRING },
+    { no: 2, name: "definition_path", kind: "scalar",  T: STRING, opt: true },
+    { no: 3, name: "description",     kind: "scalar",  T: STRING, opt: true },
+    { no: 4, name: "input_schema",    kind: "message", T: google.protobuf.Value, opt: true },
+]
+Notes:
+  - definition_path: Path to tool definition file (used by MCP file system approach)
+  - description: Full tool definition (used by MCP meta-tool approach)
+
+--- agent.v1.McpFileSystemOptions (lines 218929-218952) ---
+typeName = "agent.v1.McpFileSystemOptions"
+fields = [
+    { no: 1, name: "enabled",               kind: "scalar",  T: BOOL },
+    { no: 2, name: "workspace_project_dir", kind: "scalar",  T: STRING },
+    { no: 3, name: "mcp_descriptors",       kind: "message", T: McpDescriptor, repeated: true },
+]
+
+--- agent.v1.SkillOptions (lines 220808-220821) ---
+typeName = "agent.v1.SkillOptions"
+fields = [
+    { no: 1, name: "skill_descriptors", kind: "message", T: SkillDescriptor, repeated: true },
+]
+
+
+################################################################################
+# SECTION 9: SANDBOX POLICY / NETWORK POLICY
+################################################################################
+
+--- agent.v1.SandboxPolicy (lines 221442-221536) ---
+typeName = "agent.v1.SandboxPolicy"
+fields = [
+    { no: 1,  name: "type",                       kind: "enum",    T: SandboxPolicy_Type },
+    { no: 2,  name: "network_access",             kind: "scalar",  T: BOOL, opt: true },
+    { no: 3,  name: "additional_readwrite_paths",  kind: "scalar",  T: STRING, repeated: true },
+    { no: 4,  name: "additional_readonly_paths",   kind: "scalar",  T: STRING, repeated: true },
+    { no: 5,  name: "debug_output_dir",            kind: "scalar",  T: STRING, opt: true },
+    { no: 7,  name: "disable_tmp_write",           kind: "scalar",  T: BOOL, opt: true },
+    { no: 8,  name: "allowlist_escalated",         kind: "scalar",  T: BOOL, opt: true },
+    { no: 9,  name: "enable_shared_build_cache",   kind: "scalar",  T: BOOL, opt: true },
+    { no: 10, name: "network_policy",              kind: "message", T: NetworkPolicy, opt: true },
+    { no: 11, name: "network_policy_strict",       kind: "scalar",  T: BOOL, opt: true },
+    { no: 12, name: "capture_denies",              kind: "scalar",  T: BOOL, opt: true },
+    { no: 13, name: "skip_statsig_defaults",       kind: "scalar",  T: BOOL, opt: true },
+]
+Notes:
+  - allowlist_escalated: Indicates INSECURE_NONE was applied because command matched user's allowlist
+  - enable_shared_build_cache: Redirects build caches (npm, cargo, pip) to shared tmpdir
+  - network_policy_strict: When true (default), missing/invalid policy disables network (fail closed)
+  - skip_statsig_defaults: When true, Cursor's default allowlist NOT merged into policy
+
+--- enum agent.v1.SandboxPolicy.Type ---
+    UNSPECIFIED = 0
+    INSECURE_NONE = 1
+    WORKSPACE_READWRITE = 2
+    WORKSPACE_READONLY = 3
+
+--- agent.v1.NetworkPolicy (lines 221358-221403) ---
+typeName = "agent.v1.NetworkPolicy"
+fields = [
+    { no: 1, name: "version",        kind: "scalar",  T: UINT32, opt: true },
+    { no: 2, name: "default_action", kind: "enum",    T: NetworkPolicy_DefaultAction, opt: true },
+    { no: 3, name: "deny",           kind: "scalar",  T: STRING, repeated: true },
+    { no: 4, name: "allow",          kind: "scalar",  T: STRING, repeated: true },
+    { no: 5, name: "logging",        kind: "message", T: NetworkPolicyLoggingConfig, opt: true },
+]
+Notes:
+  - version: Must be 1
+  - default_action: Defaults to "deny"
+  - deny: Highest priority, always blocks. Supports exact domains, wildcards, CIDR
+  - allow: Supports exact domains, wildcards, CIDR
+
+--- enum agent.v1.NetworkPolicy.DefaultAction ---
+    UNSPECIFIED = 0
+    ALLOW = 1
+    DENY = 2
+
+--- agent.v1.NetworkPolicyLoggingConfig (lines 221317-221339) ---
+typeName = "agent.v1.NetworkPolicyLoggingConfig"
+fields = [
+    { no: 1, name: "decision_log_path", kind: "scalar", T: STRING, opt: true },
+    { no: 2, name: "log_format",        kind: "scalar", T: STRING, opt: true },
+]
+Notes: Currently only "jsonl" format supported
+
+--- agent.v1.SandboxPolicyMergeSources (lines 221587-221619) ---
+typeName = "agent.v1.SandboxPolicyMergeSources"
+fields = [
+    { no: 1, name: "per_user",   kind: "message", T: SandboxPolicy, opt: true },
+    { no: 2, name: "per_repo",   kind: "message", T: SandboxPolicy, opt: true },
+    { no: 3, name: "team_admin", kind: "message", T: SandboxPolicy, opt: true },
+]
+Notes:
+  - per_user: Lowest priority, overridden by all others
+  - per_repo: From .cursor/settings or similar
+  - team_admin: Enterprise controls, managed centrally
+
+
+################################################################################
+# SECTION 10: AGENT SKILLS
+################################################################################
+
+--- agent.v1.AgentSkill (lines 212839-212906) ---
+typeName = "agent.v1.AgentSkill"
+fields = [
+    { no: 1, name: "full_path",                 kind: "scalar", T: STRING },
+    { no: 2, name: "content",                   kind: "scalar", T: STRING },
+    { no: 3, name: "description",               kind: "scalar", T: STRING },
+    { no: 4, name: "parse_error",               kind: "scalar", T: STRING, opt: true },
+    { no: 5, name: "environments",              kind: "scalar", T: STRING, repeated: true },
+    { no: 6, name: "disabled_environments",     kind: "scalar", T: STRING, repeated: true },
+    { no: 7, name: "git_remote_origin",         kind: "scalar", T: STRING, opt: true },
+    { no: 8, name: "disable_model_invocation",  kind: "scalar", T: BOOL },
+]
+Notes:
+  - full_path: Absolute path to the SKILL.md file
+  - content: Full file content including frontmatter
+  - description: Short description from frontmatter
+  - environments: Valid values "cloud", "local"; empty = all
+  - disabled_environments: Takes precedence over environments
+  - disable_model_invocation: When true, model should NOT auto-invoke (still manual via / menu)
+
+--- agent.v1.AgentSkillMetadata (lines 212926-212986) ---
+typeName = "agent.v1.AgentSkillMetadata"
+fields = [
+    { no: 1, name: "full_path",                 kind: "scalar", T: STRING },
+    { no: 2, name: "description",               kind: "scalar", T: STRING },
+    { no: 3, name: "parse_error",               kind: "scalar", T: STRING, opt: true },
+    { no: 4, name: "environments",              kind: "scalar", T: STRING, repeated: true },
+    { no: 5, name: "disabled_environments",     kind: "scalar", T: STRING, repeated: true },
+    { no: 6, name: "git_remote_origin",         kind: "scalar", T: STRING, opt: true },
+    { no: 7, name: "disable_model_invocation",  kind: "scalar", T: BOOL },
+]
+Notes: Lightweight version of AgentSkill without the heavy `content` field.
+       Used for IPC transfer to the renderer where full file content is never read.
+
+
+################################################################################
+# SECTION 11: CURSOR RULES
+################################################################################
+
+--- agent.v1.CursorRule (lines 214832-214900) ---
+typeName = "agent.v1.CursorRule"
+fields = [
+    { no: 1, name: "full_path",              kind: "scalar",  T: STRING },
+    { no: 2, name: "content",                kind: "scalar",  T: STRING },
+    { no: 3, name: "type",                   kind: "message", T: CursorRuleType },
+    { no: 4, name: "source",                 kind: "enum",    T: CursorRuleSource },
+    { no: 5, name: "git_remote_origin",      kind: "scalar",  T: STRING, opt: true },
+    { no: 6, name: "parse_error",            kind: "scalar",  T: STRING, opt: true },
+    { no: 7, name: "environments",           kind: "scalar",  T: STRING, repeated: true },
+    { no: 8, name: "disabled_environments",  kind: "scalar",  T: STRING, repeated: true },
+]
+Notes:
+  - full_path: Absolute path to the .mdc file
+  - content: Rule body, trimmed to reasonable size if needed by client
+  - git_remote_origin: Normalized to host/path format (e.g., "github.com/owner/repo")
+
+--- enum agent.v1.CursorRuleSource ---
+    UNSPECIFIED = 0
+    TEAM = 1
+    USER = 2
+
+--- agent.v1.CursorRuleType (lines 214802-214818) ---
+typeName = "agent.v1.CursorRuleType"
+fields = [   // oneof "type"
+    { no: 1, name: "global",            kind: "message", T: CursorRuleTypeGlobal, oneof: "type" },
+    { no: 2, name: "file_globbed",      kind: "message", T: CursorRuleTypeFileGlobs, oneof: "type" },
+    { no: 3, name: "agent_fetched",     kind: "message", T: CursorRuleTypeAgentFetched, oneof: "type" },
+    { no: 4, name: "manually_attached", kind: "message", T: CursorRuleTypeManuallyAttached, oneof: "type" },
+]
+
+--- agent.v1.CursorRuleTypeGlobal ---
+fields = []  // empty marker
+
+--- agent.v1.CursorRuleTypeFileGlobs ---
+fields = [
+    { no: 1, name: "globs", kind: "scalar", T: STRING, repeated: true },
+]
+
+--- agent.v1.CursorRuleTypeAgentFetched ---
+fields = [
+    { no: 1, name: "description", kind: "scalar", T: STRING },
+]
+
+--- agent.v1.CursorRuleTypeManuallyAttached ---
+fields = []  // empty marker
+
+--- agent.v1.SelectedCursorRule (lines 222307-222320) ---
+typeName = "agent.v1.SelectedCursorRule"
+fields = [
+    { no: 1, name: "rule", kind: "message", T: CursorRule },
+]
+
+
+################################################################################
+# SECTION 12: INTERACTION QUERY / RESPONSE (Client-server async flow)
+################################################################################
+
+--- agent.v1.InteractionQuery (lines 211826-211852) ---
+typeName = "agent.v1.InteractionQuery"
+fields = [
+    { no: 1,  name: "id",                                kind: "scalar",  T: UINT32 },
+    // oneof "query":
+    { no: 2,  name: "web_search_request_query",          kind: "message", T: WebSearchRequestQuery, oneof: "query" },
+    { no: 3,  name: "ask_question_interaction_query",    kind: "message", T: AskQuestionInteractionQuery, oneof: "query" },
+    { no: 4,  name: "switch_mode_request_query",         kind: "message", T: SwitchModeRequestQuery, oneof: "query" },
+    { no: 7,  name: "create_plan_request_query",         kind: "message", T: CreatePlanRequestQuery, oneof: "query" },
+    { no: 8,  name: "setup_vm_environment_args",         kind: "message", T: SetupVmEnvironmentArgs, oneof: "query" },
+    { no: 9,  name: "web_fetch_request_query",           kind: "message", T: WebFetchRequestQuery, oneof: "query" },
+    { no: 10, name: "pr_management_request_query",       kind: "message", T: PrManagementRequestQuery, oneof: "query" },
+    { no: 11, name: "mcp_auth_request_query",            kind: "message", T: McpAuthRequestQuery, oneof: "query" },
+    { no: 12, name: "generate_image_request_query",      kind: "message", T: GenerateImageRequestQuery, oneof: "query" },
+]
+
+--- agent.v1.InteractionResponse (lines 211869-211895) ---
+typeName = "agent.v1.InteractionResponse"
+fields = [
+    { no: 1,  name: "id",                                  kind: "scalar",  T: UINT32 },
+    // oneof "result":
+    { no: 2,  name: "web_search_request_response",         kind: "message", T: WebSearchRequestResponse, oneof: "result" },
+    { no: 3,  name: "ask_question_interaction_response",   kind: "message", T: AskQuestionInteractionResponse, oneof: "result" },
+    { no: 4,  name: "switch_mode_request_response",        kind: "message", T: SwitchModeRequestResponse, oneof: "result" },
+    { no: 7,  name: "create_plan_request_response",        kind: "message", T: CreatePlanRequestResponse, oneof: "result" },
+    { no: 8,  name: "setup_vm_environment_result",         kind: "message", T: SetupVmEnvironmentResult, oneof: "result" },
+    { no: 9,  name: "web_fetch_request_response",          kind: "message", T: WebFetchRequestResponse, oneof: "result" },
+    { no: 10, name: "pr_management_result",                kind: "message", T: PrManagementResult, oneof: "result" },
+    { no: 11, name: "mcp_auth_request_response",           kind: "message", T: McpAuthRequestResponse, oneof: "result" },
+    { no: 12, name: "generate_image_request_response",     kind: "message", T: GenerateImageRequestResponse, oneof: "result" },
+]
+
+--- agent.v1.AskQuestionInteractionQuery (lines 211912-211930) ---
+typeName = "agent.v1.AskQuestionInteractionQuery"
+fields = [
+    { no: 1, name: "args",          kind: "message", T: AskQuestionArgs },
+    { no: 2, name: "tool_call_id",  kind: "scalar",  T: STRING },
+]
+
+--- agent.v1.AskQuestionInteractionResponse (lines 211947-211960) ---
+typeName = "agent.v1.AskQuestionInteractionResponse"
+fields = [
+    { no: 1, name: "result", kind: "message", T: AskQuestionResult },
+]
+
+
+################################################################################
+# SECTION 13: SNAPSHOT / SHARED CONVERSATION
+################################################################################
+
+--- aiserver.v1.SharedConversationSnapshot (line 314224) ---
+typeName = "aiserver.v1.SharedConversationSnapshot"
+fields = [
+    { no: 1, name: "messages", kind: "message", T: ConversationMessage, repeated: true },
+]
+
+
+################################################################################
+# SECTION 14: SAMPLE TOOL CALLS (Individual tool wrappers)
+################################################################################
+
+--- agent.v1.ShellToolCall (lines 202215-202240) ---
+typeName = "agent.v1.ShellToolCall"
+fields = [
+    { no: 1, name: "args",        kind: "message", T: ShellArgs },
+    { no: 2, name: "result",      kind: "message", T: ShellResult },
+    { no: 3, name: "description", kind: "scalar",  T: STRING, opt: true },
+]
+Notes: description = "Model-provided description of what this command does (5-10 words)"
+
+--- agent.v1.McpToolCall (lines 204177-204195) ---
+typeName = "agent.v1.McpToolCall"
+fields = [
+    { no: 1, name: "args",   kind: "message", T: McpArgs },
+    { no: 2, name: "result", kind: "message", T: McpToolResult },
+]
+
+--- agent.v1.AskQuestionToolCall (lines 205134-205152) ---
+typeName = "agent.v1.AskQuestionToolCall"
+fields = [
+    { no: 1, name: "args",   kind: "message", T: AskQuestionArgs },
+    { no: 2, name: "result", kind: "message", T: AskQuestionResult },
+]
+
+--- agent.v1.TaskToolCall (lines 208864-208882) ---
+typeName = "agent.v1.TaskToolCall"
+fields = [
+    { no: 1, name: "args",   kind: "message", T: TaskArgs },
+    { no: 2, name: "result", kind: "message", T: TaskResult },
+]
+
+--- agent.v1.ComputerUseToolCall (lines 214610-214628) ---
+typeName = "agent.v1.ComputerUseToolCall"
+fields = [
+    { no: 1, name: "args",   kind: "message", T: ComputerUseArgs },
+    { no: 2, name: "result", kind: "message", T: ComputerUseResult },
+]
+
+
+################################################################################
+# SECTION 15: AISERVER MESSAGES (Server-side protocol)
+################################################################################
+
+--- aiserver.v1.ModelDetails (lines 235729-235777) ---
+typeName = "aiserver.v1.ModelDetails"
+fields = [
+    { no: 1, name: "model_name",          kind: "scalar",  T: STRING, opt: true },
+    { no: 2, name: "api_key",             kind: "scalar",  T: STRING, opt: true },
+    { no: 3, name: "enable_ghost_mode",   kind: "scalar",  T: BOOL, opt: true },
+    { no: 4, name: "azure_state",         kind: "message", T: AzureState, opt: true },
+    { no: 5, name: "enable_slow_pool",    kind: "scalar",  T: BOOL, opt: true },
+    { no: 6, name: "openai_api_base_url", kind: "scalar",  T: STRING, opt: true },
+    { no: 7, name: "bedrock_state",       kind: "message", T: BedrockState, opt: true },
+    { no: 8, name: "max_mode",            kind: "scalar",  T: BOOL, opt: true },
+]
+
+--- aiserver.v1.ToolCall (lines 270378-270392) ---
+typeName = "aiserver.v1.ToolCall"
+fields = [   // oneof "tool_call"
+    { no: 1, name: "builtin_tool_call", kind: "message", T: BuiltinToolCall, oneof: "tool_call" },
+    { no: 2, name: "custom_tool_call",  kind: "message", T: CustomToolCall, oneof: "tool_call" },
+]
+
+--- aiserver.v1.BuiltinToolCall (lines 270113-270157) ---
+typeName = "aiserver.v1.BuiltinToolCall"
+fields = [
+    { no: 1,  name: "tool",                           kind: "enum",    T: BuiltinTool },
+    // oneof "params":
+    { no: 2,  name: "search_params",                  kind: "message", T: SearchParams, oneof: "params" },
+    { no: 3,  name: "read_chunk_params",               kind: "message", T: ReadChunkParams, oneof: "params" },
+    { no: 4,  name: "gotodef_params",                  kind: "message", T: GotodefParams, oneof: "params" },
+    { no: 5,  name: "edit_params",                     kind: "message", T: EditParams, oneof: "params" },
+    { no: 6,  name: "undo_edit_params",                kind: "message", T: UndoEditParams, oneof: "params" },
+    { no: 7,  name: "end_params",                      kind: "message", T: EndParams, oneof: "params" },
+    { no: 8,  name: "new_file_params",                 kind: "message", T: NewFileParams, oneof: "params" },
+    { no: 9,  name: "add_test_params",                 kind: "message", T: AddTestParams, oneof: "params" },
+    { no: 10, name: "run_test_params",                 kind: "message", T: RunTestParams, oneof: "params" },
+    { no: 11, name: "delete_test_params",              kind: "message", T: DeleteTestParams, oneof: "params" },
+    { no: 12, name: "save_file_params",                kind: "message", T: SaveFileParams, oneof: "params" },
+    { no: 13, name: "get_tests_params",                kind: "message", T: GetTestsParams, oneof: "params" },
+    { no: 14, name: "get_symbols_params",              kind: "message", T: GetSymbolsParams, oneof: "params" },
+    { no: 15, name: "semantic_search_params",          kind: "message", T: SemanticSearchParams, oneof: "params" },
+    { no: 16, name: "get_project_structure_params",    kind: "message", T: GetProjectStructureParams, oneof: "params" },
+    { no: 17, name: "create_rm_files_params",          kind: "message", T: CreateRmFilesParams, oneof: "params" },
+    { no: 18, name: "run_terminal_commands_params",    kind: "message", T: RunTerminalCommandsParams, oneof: "params" },
+    { no: 19, name: "new_edit_params",                 kind: "message", T: NewEditParams, oneof: "params" },
+    { no: 20, name: "read_with_linter_params",         kind: "message", T: ReadWithLinterParams, oneof: "params" },
+    { no: 21, name: "add_ui_step_params",              kind: "message", T: AddUiStepParams, oneof: "params" },
+    { no: 23, name: "read_semsearch_files_params",     kind: "message", T: ReadSemsearchFilesParams, oneof: "params" },
+    { no: 26, name: "delete_file_params",              kind: "message", T: DeleteFileParams, oneof: "params" },
+    { no: 22, name: "tool_call_id",                    kind: "scalar",  T: STRING, opt: true },
+]
+
+--- aiserver.v1.CustomToolCall (lines 271485-271503) ---
+typeName = "aiserver.v1.CustomToolCall"
+fields = [
+    { no: 1, name: "tool_id", kind: "scalar", T: STRING },
+    { no: 2, name: "params",  kind: "scalar", T: STRING },
+]
+
+--- aiserver.v1.CallMcpToolParams (lines 273737-273760) ---
+typeName = "aiserver.v1.CallMcpToolParams"
+fields = [
+    { no: 1, name: "server",    kind: "scalar",  T: STRING },
+    { no: 2, name: "tool_name", kind: "scalar",  T: STRING },
+    { no: 3, name: "tool_args", kind: "message", T: google.protobuf.Struct },
+]
+
+--- aiserver.v1.CallMcpToolResult (lines 273777-273800) ---
+typeName = "aiserver.v1.CallMcpToolResult"
+fields = [
+    { no: 1, name: "server",    kind: "scalar",  T: STRING },
+    { no: 2, name: "tool_name", kind: "scalar",  T: STRING },
+    { no: 3, name: "result",    kind: "message", T: google.protobuf.Struct },
+]
+
+--- aiserver.v1.GetMcpToolsParams (lines 273819-273848) ---
+typeName = "aiserver.v1.GetMcpToolsParams"
+fields = [
+    { no: 1, name: "server",    kind: "scalar", T: STRING, opt: true },
+    { no: 2, name: "tool_name", kind: "scalar", T: STRING, opt: true },
+    { no: 3, name: "pattern",   kind: "scalar", T: STRING, opt: true },
+]
+Notes: pattern is RE2 regex to search server and tool names (cannot combine with server)
+
+--- aiserver.v1.GetMcpToolsResult (lines 273865-273887) ---
+typeName = "aiserver.v1.GetMcpToolsResult"
+fields = [
+    { no: 1, name: "content",          kind: "scalar", T: STRING },
+    { no: 2, name: "output_file_path", kind: "scalar", T: STRING, opt: true },
+]
+Notes: content is JSON-formatted; output_file_path set if large output was written to file
+
+--- aiserver.v1.SwGetMcpToolsRequest (lines 280165-280183) ---
+typeName = "aiserver.v1.SwGetMcpToolsRequest"
+fields = [
+    { no: 1, name: "browser_integration_preference", kind: "scalar", T: STRING, opt: true },
+]
+Notes: "editor" or "playwright" for browser tools; empty = disable all
+
+--- aiserver.v1.SwGetMcpToolsResponse (lines 280200-280213) ---
+typeName = "aiserver.v1.SwGetMcpToolsResponse"
+fields = [
+    { no: 1, name: "tools", kind: "message", T: MCPParams_Tool, repeated: true },
+]
+
+
+################################################################################
+# SECTION 16: KEY ENUMS
+################################################################################
+
+--- enum agent.v1.AgentMode ---
+    UNSPECIFIED = 0
+    AGENT = 1
+    ASK = 2
+    PLAN = 3
+    DEBUG = 4
+    TRIAGE = 5
+    PROJECT = 6
+
+--- enum agent.v1.SandboxPolicy.Type ---
+    UNSPECIFIED = 0
+    INSECURE_NONE = 1
+    WORKSPACE_READWRITE = 2
+    WORKSPACE_READONLY = 3
+
+--- enum agent.v1.NetworkPolicy.DefaultAction ---
+    UNSPECIFIED = 0
+    ALLOW = 1
+    DENY = 2
+
+--- enum agent.v1.CursorRuleSource ---
+    UNSPECIFIED = 0
+    TEAM = 1
+    USER = 2
+
+
+################################################################################
+# SECTION 17: COMPLETE LIST OF ALL 2107 PROTOBUF TYPE NAMES
+# (for reference - extracted via grep on static typeName)
+################################################################################
+
+The file contains protobuf messages from two main packages:
+  - agent.v1.*    (~180+ messages) - exec-daemon internal protocol
+  - aiserver.v1.* (~1900+ messages) - client-server communication protocol
+
+Key proto source files referenced in webpack module paths:
+  - agent/v1/agent_skills.proto
+  - agent/v1/conversation_state_pb.js
+  - agent/v1/conversation_action_pb.js
+  - agent/v1/request_context_exec_pb.js
+  - agent/v1/cursor_rules_pb.js
+  - agent/v1/sandbox_policy_pb.js
+  - agent/v1/network_policy_pb.js
+  - agent/v1/mcp_pb.js
+  - agent/v1/shell_exec_pb.js
+  - agent/v1/computer_use_tool_pb.js
+  - agent/v1/generate_image_tool_pb.js
+  - agent/v1/apply_agent_diff_tool_pb.js
+  - agent/v1/report_bugfix_results_tool_pb.js
+  - agent/v1/ai_attribution_tool_pb.js
+  - agent/v1/subagents_pb.js
+  - aiserver/v1/model_details_pb.js
+  - aiserver/v1/cursor_rule_pb.js
+  - aiserver/v1/tool_call_pb.js
+
+Proto library: @bufbuild/protobuf@1.10.0 (protoc-gen-es v1.10.0)
+
+================================================================================
+END OF EXTRACTION
+================================================================================

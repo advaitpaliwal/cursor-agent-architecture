@@ -1,0 +1,1125 @@
+================================================================================
+MCP AND PLUGIN INFRASTRUCTURE - EXTRACTED FROM /exec-daemon/index.js
+================================================================================
+Source: /exec-daemon/index.js (379,539 lines, bundled webpack)
+Extracted: 2026-03-04
+
+TABLE OF CONTENTS
+1. MCP Client Implementation (McpSdkClient)
+2. MCP Caching Layer (CachedMcpClient, FileBasedMcpCacheStore)
+3. MCP Manager (McpManager)
+4. MCP Server Configuration & Loading (FileConfigMcpLoader, loadServer)
+5. MCP FileSystem Writer (McpFileSystemWriter)
+6. MCP Meta-Tool Mode (GetMcpTools/CallMcpTool)
+7. MCP Sampling (sampling/createMessage)
+8. MCP Permissions & Approval Flow
+9. Plugin System (CCPluginIdentifier, Manifests, Marketplace)
+10. Hooks System (CliHooksExecutor, HooksConfigLoader, LocalHookExecutorImpl)
+11. Permissions Service (DaemonPermissionsService, InteractivePermissionsService)
+
+================================================================================
+1. MCP CLIENT IMPLEMENTATION (McpSdkClient)
+================================================================================
+Lines: ~340286-340680
+
+The core MCP SDK client wraps the official @modelcontextprotocol/sdk Client.
+Creates an MCP client named "Cursor" version "1.0.0" with capabilities:
+tools, prompts, resources, logging:false, elicitation:{}.
+
+class mcp_McpSdkClient {
+    serverName;
+    config;
+    client;            // MCP SDK Client instance
+    tools;             // AsyncCache for tool list
+    stateValue;        // { kind: "ready" | "requires_authentication" | "error" | "loading" }
+    _authProvider;
+    _currentElicitationProvider;  // Per-tool-call elicitation context
+    _currentToolCallId;
+    _currentToolName;
+    _callToolLock = Promise.resolve();  // Serializes tool calls for elicitation
+
+    static createClient() {
+        return new Client({
+            name: "Cursor",
+            version: "1.0.0",
+        }, {
+            capabilities: {
+                tools: true,
+                prompts: true,
+                resources: true,
+                logging: false,
+                elicitation: {},
+            },
+        });
+    }
+
+    // ELICITATION HANDLER - servers can ask questions during tool execution
+    setupElicitationHandler() {
+        this.client.setRequestHandler(ElicitRequestSchema, async request => {
+            if (!this._currentElicitationProvider) {
+                return { action: "decline" };
+            }
+            const response = await this._currentElicitationProvider.elicit({
+                message: request.params.message,
+                requestedSchema: request.params.requestedSchema,
+            });
+            return { action: response.action, content: response.content };
+        });
+    }
+
+    // CONNECT VIA STREAMABLE HTTP (remote MCP servers)
+    static async fromStreamableHttp(serverName, config, tokenStorage, headers, authRedirectUrl, fetch) {
+        // Sets up OAuth provider with PKCE flow
+        // Uses StreamableHTTPClientTransport
+        // Handles UnauthorizedError -> sets state to "requires_authentication"
+        // with callback to exchange auth code for tokens
+        const transport = new StreamableHTTPClientTransport(url, {
+            authProvider: oauthProvider,
+            requestInit: {
+                headers: { "User-Agent": "Cursor/1.0.0", ...(headers ?? {}) },
+            },
+            fetch,
+        });
+        const client = mcp_McpSdkClient.createClient();
+        await client.connect(transport);
+        return new mcp_McpSdkClient(serverName, client, {
+            initialState: { kind: "ready" },
+            authProvider: oauthProvider,
+            config,
+        });
+    }
+
+    // CONNECT VIA STDIO (local command-based MCP servers)
+    static async fromCommand(ctx, serverName, config, env) {
+        const transport = new StdioClientTransport({
+            command: config.command,
+            args: config.args ?? [],
+            env,
+            cwd: config.cwd,
+            stderr: "ignore",
+        });
+        const client = mcp_McpSdkClient.createClient();
+        await client.connect(transport);
+        return new mcp_McpSdkClient(serverName, client, {
+            initialState: { kind: "ready" },
+            config,
+        });
+    }
+
+    // TOOL EXECUTION - uses lock to serialize calls (elicitation context)
+    async callTool(ctx, name, args, toolCallId, elicitationProvider) {
+        // Acquires lock to ensure exclusive access to elicitation provider
+        // Stores tool call context for elicitation correlation
+        this._currentToolCallId = toolCallId;
+        this._currentToolName = name;
+        this._currentElicitationProvider = elicitationProvider;
+        const response = await this.client.callTool({ name, arguments: args });
+        return { content: response.content, isError: response.error !== undefined };
+    }
+
+    // LIST TOOLS - paginated with cursor
+    async getTools(ctx) {
+        return this.tools.get(async () => {
+            let cursor;
+            const tools = [];
+            while (true) {
+                const response = await this.client.listTools({ cursor });
+                tools.push(...response.tools.map(tool => ({
+                    ...tool,
+                    inputSchema: tool.inputSchema,
+                    outputSchema: tool.outputSchema,
+                })));
+                cursor = response.nextCursor;
+                if (cursor === undefined) break;
+            }
+            return tools;
+        });
+    }
+
+    // LIST RESOURCES - paginated, checks server capabilities first
+    async listResources(ctx) {
+        const capabilities = this.client.getServerCapabilities();
+        if (!capabilities?.resources) return { resources: [] };
+        // ... paginated fetch
+    }
+
+    // LIST PROMPTS - checks capabilities
+    async listPrompts(ctx) {
+        const capabilities = this.client.getServerCapabilities() ?? { prompts: false };
+        if (!capabilities.prompts) return [];
+        const response = await this.client.listPrompts();
+        return response.prompts.map(prompt => ({
+            name: prompt.name,
+            description: prompt.description,
+            arguments: prompt.arguments?.map(arg => ({
+                name: arg.name, description: arg.description, required: arg.required,
+            })),
+        }));
+    }
+}
+
+
+================================================================================
+2. MCP CACHING LAYER (CachedMcpClient, FileBasedMcpCacheStore)
+================================================================================
+Lines: ~334061-334340
+
+File-based cache stores MCP tool/resource/prompt definitions to disk so they
+can be served immediately while the real client connects in the background.
+
+class cache_FileBasedMcpCacheStore {
+    mcpCachePath;    // e.g. ~/.cursor/projects/<slug>/mcp-cache.json
+    mcpCachePromise;
+
+    constructor(mcpCachePath) {
+        this.mcpCachePromise = this.loadMcpCache();
+    }
+
+    async loadCache(identifier) {
+        const mcpCache = await this.mcpCachePromise;
+        return mcpCache[identifier] ?? undefined;
+    }
+
+    async saveCache(identifier, definition) {
+        const mcpCache = await this.mcpCachePromise;
+        mcpCache[identifier] = definition;
+        await mkdir(path.dirname(this.mcpCachePath), { recursive: true });
+        await writeFile(this.mcpCachePath, JSON.stringify(mcpCache, null, 2));
+    }
+}
+
+class CachedMcpClient {
+    // Wraps a clientPromise (still connecting) with cached data
+    // Eagerly fetches tools, resources, prompts and saves to cache
+    // Returns cached data while client is still connecting
+
+    constructor(ctx, serverName, clientPromise, cacheEntry, cache) {
+        // Eagerly fetch tools and save
+        this.toolsPromise = this.clientPromise.then(async client => {
+            const tools = await client.getTools(ctx);
+            await this.cache.saveCache(this.serverName, { ...existing, tools });
+            return tools;
+        });
+        // Similarly for resources and prompts (serialized saves)
+    }
+
+    async getTools(ctx) {
+        // 1. Check if promise already resolved
+        const currentValue = getIfReady(this.toolsPromise);
+        if (currentValue !== undefined) return currentValue;
+        // 2. Return cached entry if available
+        if (this.cacheEntry !== undefined) return this.cacheEntry.tools;
+        // 3. Wait for actual fetch
+        return await this.toolsPromise;
+    }
+}
+
+
+================================================================================
+3. MCP MANAGER (McpManager)
+================================================================================
+Lines: ~340866-340967
+
+Manages multiple MCP clients, provides unified tool set and instructions.
+
+class mcp_McpManager {
+    clients;                    // Record<string, McpClient>
+    elicitationFactory;
+    changeListeners = new Set();
+
+    onDidChange(listener) {
+        this.changeListeners.add(listener);
+        return () => { this.changeListeners.delete(listener); };
+    }
+
+    getClients() { return this.clients; }
+    getClient(name) { return this.clients[name]; }
+    setClient(name, client) { this.clients[name] = client; this.fireDidChange(); }
+    deleteClient(name) { delete this.clients[name]; this.fireDidChange(); }
+
+    // Build unified tool set from all clients
+    async getToolSet(ctx) {
+        const clientTools = await asyncMapValues(
+            Object.entries(this.clients),
+            ([key, client]) => client.getTools(ctx)
+                .then(tools => tools.map(tool => ({
+                    ...tool, clientKey: key, clientName: client.serverName, client
+                })))
+                .catch(() => []),
+            { max: 4 }  // max 4 concurrent
+        );
+        // Tool naming: `${clientName}-${toolName}`
+        const toolsMap = {};
+        for (const tool of tools) {
+            toolsMap[`${tool.clientName}-${tool.name}`] = {
+                definition: { ...tool, providerIdentifier: tool.clientName, toolName: tool.name },
+                execute: async (args, toolCallId, elicitationFactory) => {
+                    const elicitationProvider = elicitationFactory?.createProvider(
+                        tool.clientName, tool.name, toolCallId
+                    );
+                    return tool.client.callTool(ctx, tool.name, args, toolCallId, elicitationProvider);
+                },
+            };
+        }
+        return new ExecutableMcpToolSet(toolsMap);
+    }
+
+    // Collect instructions from all clients
+    async getInstructions(ctx) {
+        // Returns McpInstructions[] with serverName + instructions text
+    }
+}
+
+
+================================================================================
+4. MCP SERVER CONFIGURATION & LOADING
+================================================================================
+Lines: ~341028-341310
+
+Server discovery via config files, middleware chain, blocking service.
+
+--- Path Expansion ---
+function expandPath(args) {
+    // ~ or ~/... -> os.homedir() + rest
+    // ./ or .   -> resolved relative to baseDir
+}
+
+--- Server Loading ---
+async function loadServer(ctx, serverName, server, tokenStorage, middlewareSettings, authRedirectUrlGenerator) {
+    // Middleware chain pattern
+    let next = async (ctx, currentServer) => {
+        if ("command" in currentServer) {
+            return await loadCommandBasedServerWithElicitation(ctx, serverName, currentServer);
+        }
+        if ("url" in currentServer) {
+            return await loadHttpServer(ctx, serverName, currentServer, tokenStorage, authRedirectUrl);
+        }
+        throw new Error(`Invalid server`);
+    };
+    for (const middleware of middlewares) {
+        const previousNext = next;
+        next = async (ctx, server) => middleware.load(ctx, serverName, server, configPath, previousNext);
+    }
+    return await next(ctx, server);
+}
+
+--- Server Blocking Middleware ---
+class loader_ServerBlockingMiddleware {
+    async load(ctx, serverName, server, _configPath, next) {
+        const isBlocked = await this.blockingService.isServerBlocked({
+            command: "command" in server ? server.command : undefined,
+            url: "url" in server ? server.url : undefined,
+        });
+        if (isBlocked) throw new Error(`MCP server "${serverName}" is blocked by team policy or denylist`);
+        return next(ctx, server);
+    }
+}
+
+--- File-Based Config Loader ---
+class loader_FileConfigMcpLoader {
+    configPath;           // Path to mcp.json or similar
+    tokenStorage;
+    middlewares;
+    clientCache = new Map();
+
+    async load(ctx, cache = true) {
+        const config = await this.configPromise;
+        // Load all servers, skip disabled/unapproved
+        await Promise.all(Object.entries(config.mcpServers).map(async ([identifier]) => {
+            try {
+                const client = await this.loadClient(ctx, identifier);
+                clients[identifier] = client;
+            } catch (error) {
+                if (error instanceof McpServerDisabledError) return;
+                if (error instanceof McpServerNotApprovedError) return;
+                console.error(`Failed to load MCP server "${identifier}":`, error);
+            }
+        }));
+        return new McpManager(clients, this.elicitationFactory);
+    }
+}
+
+--- Token Storage ---
+class IdentifierScopedTokenStorage {
+    // Scopes global token storage to a specific server identifier
+    async loadTokens() { return this.storage.loadTokens(this.identifier); }
+    async saveTokens(tokens) { return this.storage.saveTokens(this.identifier, tokens); }
+    async loadClientInformation() { return this.storage.loadClientInformation(this.identifier); }
+    async saveClientInformation(info) { return this.storage.saveClientInformation(this.identifier, info); }
+}
+
+
+================================================================================
+5. MCP FILESYSTEM WRITER (McpFileSystemWriter)
+================================================================================
+Lines: ~341751-342850
+
+Writes MCP server data (tools, resources, prompts, instructions) to disk
+so the agent can discover them via file listing. This is the "MCP file system"
+approach (alternative to meta-tool approach).
+
+--- Directory Structure ---
+~/.cursor/projects/<slug>/mcps/
+    <server-name>/
+        tools/
+            <tool-name>.json       # Tool definition with inputSchema
+        resources/
+            <resource-name>.json   # Resource metadata
+        prompts/
+            <prompt-name>.json     # Prompt metadata
+        INSTRUCTIONS.md            # Server instructions
+        STATUS.md                  # Server status (connected/error/needsAuth)
+        SERVER_METADATA.json       # Server metadata
+
+--- Constants ---
+const MCP_AUTH_TOOL_NAME = "mcp_auth";
+const DEFAULT_MCP_AUTH_TOOL_DESCRIPTION = "Authenticate this MCP server...";
+const DEFAULT_MCP_ERROR_STATUS_MESSAGE = "The MCP server errored...";
+const DEFAULT_MCP_NEEDS_AUTH_STATUS_MESSAGE = 'The MCP server needs authentication. Authenticate it by calling the `{authToolName}` tool...';
+
+--- .gitignore for ~/.cursor ---
+// Creates a .gitignore in ~/.cursor to allowlist:
+// - projects/*/mcps/          - MCP tool descriptors
+// - projects/*/agent-transcripts/
+// - projects/*/terminals/
+// - projects/*/agent-notes/
+// - projects/*/agent-tools/
+// - plugins/
+// - skills-cursor/
+// - skills/
+// - commands/
+// - plans/
+// - subagents/
+// - rules/
+
+class McpFileSystemWriter {
+    projectDir;
+    mcpLease;
+    debounceMs;                     // Default 100ms
+    cachedServerData;               // In-memory mirror of what's on disk
+    cachedFingerprints = new Map(); // For change detection
+
+    constructor(mcpLease, projectDir, options) {
+        // Cleanup stale staging dirs
+        // Subscribe to lease changes -> debounced write
+        // Schedule initial write
+        // Ensure ~/.cursor/.gitignore exists
+    }
+
+    async fetchAndWrite(ctx) {
+        const [tools, instructions, clients] = await Promise.all([
+            this.mcpLease.getTools(ctx),
+            this.mcpLease.getInstructions(ctx),
+            this.mcpLease.getClients(),
+        ]);
+
+        // Build per-server data map
+        // Populate tools from lease-level getTools() first
+        // Fallback to per-client getTools() for freshly authenticated servers
+        // Inject virtual mcp_auth tool for needsAuth servers
+        // Write to disk using atomic staging approach
+    }
+
+    async writeServerDirectory(ctx, server) {
+        // Write tools/<toolName>.json for each tool
+        // Write resources/<resourceName>.json
+        // Write prompts/<promptName>.json
+        // Write INSTRUCTIONS.md
+        // Write STATUS.md based on server status
+        // Write SERVER_METADATA.json
+    }
+
+    async getMcpFileSystemOptions(ctx, options) {
+        // Build McpFileSystemOptions from cached server data
+        // Returns McpDescriptor[] with tools definitions
+    }
+}
+
+--- Server Status Mapping ---
+function clientStateToServerStatus(state) {
+    switch (state.kind) {
+        case "loading":                 return "initializing";
+        case "requires_authentication": return "needsAuth";
+        case "ready":                   return "connected";
+        case "error":                   return "error";
+        default:                        return "disconnected";
+    }
+}
+
+
+================================================================================
+6. MCP META-TOOL MODE (GetMcpTools / CallMcpTool)
+================================================================================
+Lines: ~208230-208425 (proto), ~273734-273870 (server proto), ~218967-219000, ~347697-347717
+
+Alternative to the MCP file system approach. Instead of writing tool definitions
+to disk, uses two meta-tools: GetMcpTools (discovery) and CallMcpTool (execution).
+
+--- Client-side opt-in ---
+// In ConversationSettings:
+//   mcp_meta_tool_options = 34 (optional McpMetaToolOptions)
+// When enabled=true, agent uses GetMcpTools/CallMcpTool instead of MCP file system
+
+--- McpMetaToolOptions ---
+class McpMetaToolOptions {
+    enabled = false;                    // Whether meta-tool mode is active
+    mcpDescriptors = [];                // McpDescriptor[] with server/tool info
+    // typeName = "agent.v1.McpMetaToolOptions"
+}
+
+--- GetMcpToolsArgs (agent.v1) ---
+class GetMcpToolsArgs {
+    server;      // optional - MCP server identifier to inspect
+    toolName;    // optional - specific tool name (requires server)
+    pattern;     // optional - RE2 regex to search server/tool names
+    toolCallId;  // internal tool call ID
+    // typeName = "agent.v1.GetMcpToolsArgs"
+}
+
+--- GetMcpToolsSuccess ---
+class GetMcpToolsSuccess {
+    content = "";           // JSON-formatted tool catalog/search results/details
+    outputFilePath;         // optional - if large output written to file
+}
+
+--- GetMcpToolsError ---
+class GetMcpToolsError {
+    error = "";
+}
+
+--- CallMcpToolParams (aiserver.v1) ---
+class CallMcpToolParams {
+    server = "";        // MCP server identifier
+    toolName = "";      // Tool name to call
+    toolArgs;           // google.protobuf.Struct - tool arguments
+    // typeName = "aiserver.v1.CallMcpToolParams"
+}
+
+--- CallMcpToolResult (aiserver.v1) ---
+class CallMcpToolResult {
+    server = "";
+    toolName = "";
+    result;             // google.protobuf.Struct - tool result
+}
+
+--- Building meta-tool options ---
+function buildMcpMetaToolOptions(mcpState) {
+    const mcpDescriptors = mcpState.servers.map(server => {
+        const instructions = server.instructions
+            .map(i => i.instructions).filter(Boolean).join("\n");
+        return new McpDescriptor({
+            serverIdentifier: server.serverIdentifier,
+            serverName: server.serverName,
+            serverUseInstructions: instructions || undefined,
+            tools: server.tools.map(tool => new McpToolDescriptor({
+                toolName: tool.toolName,
+                description: tool.description,
+                inputSchema: tool.inputSchema !== undefined
+                    ? Value.fromJson(tool.inputSchema)
+                    : undefined,
+            })),
+        });
+    });
+    return new McpMetaToolOptions({ enabled: true, mcpDescriptors });
+}
+
+
+================================================================================
+7. MCP SAMPLING (sampling/createMessage)
+================================================================================
+Lines: ~337300-337355
+
+MCP protocol defines sampling/createMessage for servers to request LLM completions.
+
+--- Schema ---
+const CreateMessageRequestSchema = RequestSchema.extend({
+    method: literal("sampling/createMessage"),
+    params: BaseRequestParamsSchema.extend({
+        messages: array(SamplingMessageSchema),
+        systemPrompt: optional(string()),
+        includeContext: optional(enum(["none", "thisServer", "allServers"])),
+        temperature: optional(number()),
+        maxTokens: number().int(),
+        stopSequences: optional(array(string())),
+        metadata: optional(object({}).passthrough()),
+        modelPreferences: optional(ModelPreferencesSchema),
+    }),
+});
+
+const CreateMessageResultSchema = ResultSchema.extend({
+    model: string(),
+    stopReason: optional(enum(["endTurn", "stopSequence", "maxTokens"]).or(string())),
+    role: enum(["user", "assistant"]),
+    content: discriminatedUnion("type", [TextContentSchema, ImageContentSchema, AudioContentSchema]),
+});
+
+--- Client capability check ---
+// In MCP SDK Client:
+assertRequestHandlerCapability(method) {
+    switch (method) {
+        case "sampling/createMessage":
+            if (!this._capabilities.sampling)
+                throw new Error(`Client does not support sampling capability`);
+            break;
+        case "elicitation/create":
+            if (!this._capabilities.elicitation)
+                throw new Error(`Client does not support elicitation capability`);
+            break;
+    }
+}
+
+
+================================================================================
+8. MCP TOOL EXECUTOR & PERMISSIONS
+================================================================================
+Lines: ~343158-343325
+
+The LocalMcpToolExecutor handles MCP tool execution with full permissions flow.
+
+class LocalMcpToolExecutor {
+    toolSet;                    // MCP tool set from McpManager
+    permissionsService;         // Checks shouldBlockMcp
+    pendingDecisionProvider;    // For user approval prompts
+    projectDir;
+    fileOutputThresholdBytes;   // MCP_TEXT_FILE_THRESHOLD
+    elicitationFactory;
+
+    async execute(parentCtx, args) {
+        // 1. CHECK PERMISSIONS
+        const blockReason = await this.permissionsService.shouldBlockMcp(ctx, args);
+        if (blockReason) {
+            const blockResult = await handleBlockReason(blockReason, {
+                onNeedsApproval: async (approvalReason, approvalDetails) => {
+                    // Request user approval via pendingDecisionProvider
+                    const result = await this.pendingDecisionProvider.requestApproval({
+                        type: OperationType.Mcp,
+                        details: { name, toolName, providerIdentifier, args },
+                        toolCallId: args.toolCallId,
+                    });
+                    if (!result.approved) {
+                        return McpResult({ case: "rejected", value: McpRejected(...) });
+                    }
+                    return null; // Continue with execution
+                },
+                onUserRejected: reason => McpResult({ case: "error", value: McpError(...) }),
+                onPermissionDenied: (errorMessage, metadata) =>
+                    McpResult({ case: "permissionDenied", value: McpPermissionDenied(...) }),
+            });
+            if (blockResult) return blockResult;
+        }
+
+        // 2. EXECUTE TOOL
+        const toolSet = await this.toolSet.getToolSet(ctx);
+        result = await toolSet.execute(args.name, parsedArgs, args.toolCallId, this.elicitationFactory);
+
+        // 3. PROCESS RESULTS
+        // - Text content: may write to file if > threshold
+        // - Image content: resize if needed
+        // - Resource content: extract text
+        // - Returns McpSuccess with content items
+    }
+}
+
+--- Browser MCP Provider IDs ---
+const CURSOR_IDE_BROWSER_PROVIDER_ID = "cursor-ide-browser";
+const CURSOR_SELF_CONTROL_PROVIDER_ID = "cursor-dev-control";
+const BROWSER_MCP_PROVIDER_IDS = new Set([
+    CURSOR_IDE_BROWSER_PROVIDER_ID,
+    "cursor-browser-extension",  // deprecated
+]);
+
+
+================================================================================
+9. PLUGIN SYSTEM
+================================================================================
+Lines: ~350430-350820
+
+--- CCPluginIdentifier Parsing ---
+Supported formats:
+  - plugin-name                         -> marketplace: claude-plugins-official
+  - plugin-name@marketplace-name        -> marketplace: <name>
+  - plugin-name@marketplace-name#1.0    -> marketplace with version
+  - plugin-name@github:org/repo         -> GitHub repository
+  - plugin-name@local:/path/to/plugin   -> absolute local path
+  - plugin-name@local:relative-name     -> ~/.cursor/plugins/local/<name>
+  - plugin-name@url:https://...         -> Git URL
+
+class CCPluginIdentifierError extends Error {
+    constructor(message, raw) {
+        super(`Invalid Claude Code plugin identifier "${raw}": ${message}`);
+        this.name = "CCPluginIdentifierError";
+    }
+}
+
+function identifiers_parseCCPluginSourceInfo(identifier) {
+    // Returns: { name, sourceType, marketplace/githubRepo/localPath/gitUrl, raw }
+    // Validates: alphanumeric+dash+underscore, max 100 chars
+    // sourceType: "marketplace" | "github" | "local" | "url"
+}
+
+function serializeCCPluginIdentifier(id) {
+    switch (id.sourceType) {
+        case "marketplace": return `${id.name}@${id.marketplace}${id.version ? '#' + id.version : ''}`;
+        case "github":      return `${id.name}@github:${id.githubRepo}`;
+        case "local":       return `${id.name}@local:${id.localPath}`;
+        case "url":         return `${id.name}@url:${id.gitUrl}`;
+    }
+}
+
+function getCCPluginKey(id) {
+    // Returns stable key for deduplication
+    // marketplace: "marketplace/name"
+    // github:      "github:org/repo/name"
+    // local:       "local:path"
+    // url:         "url:sanitized-url/name"
+}
+
+--- Plugin Identifier Types ---
+function identifiers_getPluginIdentifierKey(ident) {
+    if (ident.source === "claude-plugin") return ident.sourceInfo.raw;
+    if (ident.source === "user-local")    return `user-local:${info.name}`;
+    return `${info.name}-${info.version}`;  // cursor-managed marketplace
+}
+
+--- Plugin Manifest Schema ---
+// Plugin roots: .cursor-plugin/ or .claude-plugin/
+// Manifest: plugin.json
+// Marketplace: marketplace.json
+
+const PluginManifestSchema = {
+    name:        string (kebab-case required),
+    displayName: string (optional),
+    description: string (optional),
+    version:     string (optional),
+    author:      { name, email? } (optional),
+    publisher:   string (optional),
+    homepage:    URL (optional),
+    repository:  URL (optional),
+    license:     string (optional),
+    logo:        string (optional),
+    keywords:    string[] (optional),
+    commands:    string | string[] (optional),  // slash commands
+    agents:      string | string[] (optional),  // agent definitions
+    skills:      string | string[] (optional),  // skill definitions
+    rules:       string | string[] (optional),  // cursor rules
+    hooks:       string | Record (optional),    // hooks configuration
+    mcpServers:  string | Record | (string|Record)[] (optional),  // MCP servers
+};
+
+const MarketplaceManifestSchema = {
+    name:        string (kebab-case),
+    owner:       { name, email? },
+    description: string (optional),
+    plugins:     MarketplacePluginEntry[],
+    metadata:    { description?, version?, pluginRoot? } (optional),
+};
+
+const MarketplacePluginEntrySchema = {
+    name, displayName, source, description, version,
+    author, publisher, homepage, repository, license,
+    keywords, logo, category, tags,
+    strict: boolean (default true),
+    commands, agents, skills, rules, hooks, mcpServers,
+};
+
+// Source types for marketplace plugins:
+const GitHubSourceSchema = { source: "github", repo: "owner/repo", ref?, sha? };
+const GitUrlSourceSchema = { source: "url", url: "...git", ref?, sha? };
+
+--- Plugin Protobuf Messages ---
+// Lines ~291632-291862, ~316246-317951
+// Full CRUD API for plugins:
+class Plugin { ... }                    // Plugin definition
+class UserPluginInstall { ... }         // Per-user install state
+class TeamPluginInstall { ... }         // Per-team install state
+class GetPluginMcpConfigRequest { ... }
+class GetPluginMcpConfigResponse { ... }
+class BatchGetPluginMcpConfigRequest { ... }
+class AddMcpServersFromPluginRequest { ... }
+class ParseGitHubRepoForPluginRequest { ... }
+class ImportPluginsFromGitHubRequest { ... }
+class ListMarketplacePluginsRequest { ... }
+class InstallUserPluginRequest { ... }
+class SubmitPluginForApprovalRequest { ... }
+class ApprovePluginRequest { ... }
+class CheckPluginRepoUpdatesRequest { ... }
+// etc.
+
+
+================================================================================
+10. HOOKS SYSTEM
+================================================================================
+Lines: ~197590-197815 (LocalHookExecutorImpl), ~200580-201570 (types/validators),
+       ~369837-370810 (CliHooksExecutor, HooksConfigLoader)
+
+--- Hook Steps (All Supported Events) ---
+const HookStep = {
+    beforeShellExecution,    // Before shell command
+    beforeMCPExecution,      // Before MCP tool call
+    afterShellExecution,     // After shell command
+    afterMCPExecution,       // After MCP tool call
+    beforeReadFile,
+    afterFileEdit,
+    beforeTabFileRead,
+    afterTabFileEdit,
+    stop,                    // When agent stops
+    beforeSubmitPrompt,      // Before user prompt sent
+    afterAgentResponse,
+    afterAgentThought,
+    sessionStart,
+    sessionEnd,
+    preCompact,              // Before context compaction
+    subagentStart,
+    subagentStop,
+    preToolUse,              // Generic pre-tool hook (Claude Code compatible)
+    postToolUse,             // Generic post-tool hook
+    postToolUseFailure,
+};
+
+--- Claude Code to Cursor Event Mapping ---
+const CLAUDE_EVENT_TO_CURSOR_STEP = {
+    PreToolUse:        "preToolUse",
+    PostToolUse:       "postToolUse",
+    UserPromptSubmit:  "beforeSubmitPrompt",
+    Stop:              "stop",
+    SubagentStop:      "subagentStop",
+    SessionStart:      "sessionStart",
+    SessionEnd:        "sessionEnd",
+    PreCompact:        "preCompact",
+    PermissionRequest: null,   // Not supported in Cursor
+    Notification:      null,   // Not supported in Cursor
+};
+
+--- Claude Code to Cursor Tool Name Mapping ---
+const CLAUDE_TOOL_TO_CURSOR_TOOL = {
+    Bash:      "Shell",
+    Read:      "Read",
+    Write:     "Write",
+    Edit:      "Write",    // Edit maps to Write
+    Glob:      null,       // Not exposed in CLI
+    Grep:      "Grep",
+    WebFetch:  "WebFetch",
+    WebSearch: "WebSearch",
+    Task:      "Task",
+};
+
+// MCP tool mapping: mcp__<server>__<tool> -> MCP:<tool>
+
+--- Hook Response Validation ---
+PreToolUse response:
+  - permission: "allow" | "deny" | "ask" (optional)
+  - user_message: string (optional)
+  - agent_message: string (optional)
+  - updated_input: object (optional, allows modifying tool input)
+
+PostToolUse response:
+  - additional_context: string (optional)
+
+PostToolUseFailure response:
+  - (observability-only, base response only)
+
+SessionStart response:
+  - env: Record<string, string> (optional, sets session env vars)
+  - additional_context: string (optional)
+  - continue: boolean (optional)
+  - user_message: string (optional)
+
+Stop response:
+  - followup_message: string (optional)
+
+SubagentStart response:
+  - permission: "allow" | "deny" | "ask" (optional)
+  - user_message: string (optional)
+
+--- Permission Merging ---
+const PERMISSION_HOOK_STEPS = [
+    beforeShellExecution, beforeMCPExecution, beforeReadFile,
+    beforeTabFileRead, subagentStart, preToolUse,
+];
+// Priority: deny > ask > allow > undefined
+
+--- Hook Execution Constants ---
+const DEFAULT_HOOK_TIMEOUT_SECONDS = 60;
+const DEFAULT_STOP_HOOK_LOOP_LIMIT = 5;
+const HOOK_BLOCK_EXIT_CODE = 2;  // Exit code 2 = block action
+
+--- LocalHookExecutorImpl ---
+// Bridges protobuf hook requests to the hook executor
+class LocalHookExecutorImpl {
+    hookExecutor;
+
+    async execute(_ctx, args) {
+        switch (request.request.case) {
+            case "preToolUse":
+                // Convert proto -> { tool_name, tool_input, tool_use_id, cwd, ... }
+                const response = await this.hookExecutor.executeHookForStep(HookStep.preToolUse, hookRequest);
+                return ExecuteHookResult({
+                    response: ExecuteHookResponse({
+                        case: "preToolUse",
+                        value: PreToolUseRequestResponse({
+                            permission: response?.permission,
+                            userMessage: response?.user_message,
+                            agentMessage: response?.agent_message,
+                            updatedInput: response?.updated_input ? JSON.stringify(...) : undefined,
+                        }),
+                    }),
+                });
+
+            case "postToolUse":
+                // Returns: additionalContext from hook
+            case "postToolUseFailure":
+                // Fire-and-forget, returns empty response
+            case "preCompact":
+                // Returns: user_message
+            case "subagentStart":
+                // Returns: permission, user_message
+            case "subagentStop":
+                // Returns: followup_message
+        }
+    }
+
+    hasFailClosedHooksForStep(step, toolName) {
+        return this.hookExecutor.hasFailClosedHooksForStep?.(step, toolName) ?? false;
+    }
+}
+
+--- CliHooksExecutor ---
+class CliHooksExecutor {
+    config;          // Loaded hooks config (enterprise, team, user, project, claude-*)
+    workspacePath;
+    sessionEnv;      // Session environment from sessionStart hook
+
+    hasHooksForStep(step) {
+        // Checks all config sources: enterprise, team, user, project, claude-*
+    }
+
+    hasFailClosedHooksForStep(step, toolName) {
+        // Only checks cursor configs (enterprise, team, project, user)
+        // failClosed scripts block on timeout/error
+    }
+
+    // Session environment management
+    setSessionEnvironment(env) { this.sessionEnv = { ...this.sessionEnv, ...env }; }
+    clearSessionEnvironment() { this.sessionEnv = undefined; }
+}
+
+--- HooksConfigLoader ---
+function getHooksConfigPaths(projectDir) {
+    return {
+        enterpriseConfigPath:        getEnterpriseHooksPath(),
+        userConfigPath:              ~/.cursor/hooks.json,
+        projectConfigPath:           <projectDir>/.cursor/hooks.json,
+        claudeUserConfigPath:        ~/.claude/settings.json,
+        claudeProjectConfigPath:     <projectDir>/.claude/settings.json,
+        claudeProjectLocalConfigPath: <projectDir>/.claude/settings.local.json,
+    };
+}
+
+class config_loader_HooksConfigLoader {
+    async load(options = {}) {
+        // Load in order:
+        // 1. Enterprise hooks (cursor format)
+        // 2. Team hooks (cursor format)
+        // 3. User hooks (~/.cursor/hooks.json)
+        // 4. Project hooks (<projectDir>/.cursor/hooks.json)
+        // 5. Claude user hooks (~/.claude/settings.json) -> transformed
+        // 6. Claude project hooks (<projectDir>/.claude/settings.json) -> transformed
+        // 7. Claude project local hooks -> transformed
+        // Then: deduplicate Claude hooks against Cursor hooks
+    }
+
+    dedupeClaudeHooksAgainstCursorHooks(result) {
+        // Build map of step -> Set<hookKey> for Cursor hooks
+        // Filter Claude hooks to remove duplicates
+        // hookKey = "command:..." or "prompt:..."
+    }
+}
+
+
+================================================================================
+11. PERMISSIONS SERVICE
+================================================================================
+Lines: ~366341-367540 (InteractivePermissionsService), ~378155-378205 (DaemonPermissionsService)
+
+--- DaemonPermissionsService (exec-daemon, permissive) ---
+class DaemonPermissionsService {
+    _defaultPolicy;  // Default: { type: "insecure_none" }
+
+    shouldBlockRead(_filePath) { return false; }
+    shouldBlockWrite(_ctx, _filePath, _newContents) { return false; }
+    shouldBlockShellCommand(_ctx, _command, _options, requestedPolicy) {
+        // Merges requested policy with default
+        // Handles network policies, readonly paths, readwrite paths
+        return { kind: "allow", policy: merged };
+    }
+    shouldBlockMcp(_ctx, _args) { return false; }  // Always allows in daemon
+}
+
+--- InteractivePermissionsService (full IDE, interactive) ---
+class InteractivePermissionsService {
+    ignoreService;
+    pendingDecisionStore;
+    permissionsProvider;
+    teamSettingsService;
+    rootDirectories;
+
+    async shouldBlockRead(filePath) {
+        // 1. Check repo blocklist
+        // 2. Check explicit deny in permissions
+        // 3. Allow Cursor internal paths (~/.cursor/projects/, ~/.cursor/worktrees/)
+        // 4. Check cursorIgnore
+        // 5. Allow reads for out-of-workspace
+    }
+
+    async shouldBlockWrite(parentCtx, filePath, newContents) {
+        // 1. Check repo blocklist
+        // 2. Check explicit deny
+        // 3. HARD BLOCK writes to .cursorignore (CVE-2025-64110 protection)
+        // 4. Allow Cursor internal paths
+        // 5. Check cursorIgnore -> auto block
+        // 6. Check explicit allow -> skip prompts
+        // 7. workspace_readonly -> block
+        // 8. "Run Everything" (unrestricted) -> allow all
+        // 9. Dotfile/cursor config protection
+        // 10. Out-of-workspace prompts
+    }
+
+    async shouldBlockMcp(ctx, args) {
+        // 1. Check explicit deny list
+        // 2. If admin MCP allowlist enabled:
+        //    - Only check admin's list, never user's
+        //    - If in team allowlist -> allow
+        // 3. Else check user's allowlist
+        // 4. workspace_readonly + not unrestricted -> block
+        // 5. Auto-run mode: check team blocks MCP
+        // 6. Default: needsApproval with { type: "mcp", name, toolName, providerIdentifier, args }
+    }
+
+    async shouldBlockShellCommand(ctx, command, options) {
+        // Complex flow with:
+        // - Repo blocklist
+        // - cursorIgnore
+        // - Explicit deny/allow patterns
+        // - Team admin auto-run controls (allowed/blocked command patterns)
+        // - Sandbox policy resolution
+        // - Network controls
+    }
+}
+
+--- Block Reason Types ---
+// { type: "adminBlock", source: string }
+// { type: "permissionsConfig", isReadonly?: boolean }
+// { type: "cursorIgnore" }
+// { type: "needsApproval", approvalReason: string, approvalDetails: { type: "mcp"|"shell"|..., ... } }
+
+--- Team Admin Controls ---
+// isServerBlocked(server) - checks allowedMcpConfiguration
+// getAutoRunControls() - { enabled, allowed[], blocked[], enableRunEverything, mcpToolAllowlist[] }
+// getShouldBlockMcp() - team-level MCP blocking
+// getNetworkAccessControls() - { allowlist[], denylist[], available }
+// getSandboxingControls() - { networkingDisabled, gitDisabled }
+
+
+================================================================================
+APPENDIX: SETUP DAEMON - MCP WIRING
+================================================================================
+Lines: ~378209-378645
+
+async function setupDaemon(options) {
+    // options includes: mcpConfig (JSON), httpMcpToolsFile, sandboxPolicyJson, etc.
+
+    // 1. Parse MCP config from CLI option
+    let mcpConfig;
+    if (mcpConfigJson) {
+        mcpConfig = config_mcpConfigSchema.parse(JSON.parse(mcpConfigJson));
+    }
+
+    // 2. Load stdio MCP servers
+    const customClients = {};
+    for (const [serverName, serverConfig] of Object.entries(mcpConfig.mcpServers)) {
+        const tokenStorage = createEphemeralScopedTokenStorage();
+        customClients[serverName] = await loadServer(ctx, serverName, serverConfig, tokenStorage);
+    }
+
+    // 3. Create MCP manager
+    const mcpManager = await mcpLoaderWithCustomClients.load(globalContext);
+    const stdioMcpLease = new ManagerMcpLease(mcpManager);
+
+    // 4. Load HTTP MCP tools from file (passed by Cursor IDE)
+    if (httpMcpToolsJson) {
+        httpMcpLease = new StaticMcpLease(JSON.parse(httpMcpToolsJson));
+    }
+
+    // 5. Create McpFileSystemWriter if HTTP tools exist
+    if (httpMcpLease) {
+        const combinedMcpLease = new CombinedMcpLease([stdioMcpLease, httpMcpLease]);
+        mcpFileSystemWriter = new McpFileSystemWriter(combinedMcpLease, projectDir, {
+            loggerBackend: globalContext.get(loggerKey),
+        });
+    }
+
+    // 6. Setup permissions
+    const permissionsService = new DaemonPermissionsService(defaultSandboxPolicy);
+
+    // 7. Setup hooks
+    const hooksConfigPaths = getHooksConfigPaths(projectDir);
+    const configLoader = new HooksConfigLoader(fileReader, hooksConfigPaths);
+    const hooksConfig = await configLoader.load();
+    const hookExecutor = new CliHooksExecutor(
+        hooksConfig, projectDir, globalHookContext,
+        hooksTerminalExecutor, options.promptHookClient
+    );
+
+    // 8. Create resource provider
+    const baseResources = new LocalResourceProvider({
+        permissionsService,
+        mcpLease,
+        projectDir,
+        getMcpFileSystemOptions: mcpFileSystemWriter
+            ? async (ctx, options) => mcpFileSystemWriter.getMcpFileSystemOptions(ctx, options)
+            : undefined,
+    });
+
+    // 9. Wrap with hooks
+    const resources = new ListableHooksResourceAccessor(
+        redactedResources, hookExecutor, ...
+    );
+
+    return { resources, hookExecutor, mcpFileSystemWriter, ... };
+}
+
+
+================================================================================
+KEY ARCHITECTURE PATTERNS
+================================================================================
+
+1. TWO MCP DISCOVERY MODES:
+   a) File System Mode: McpFileSystemWriter writes tool definitions to disk
+      under ~/.cursor/projects/<slug>/mcps/<server>/tools/<tool>.json
+      Agent discovers tools by listing the file system.
+   b) Meta-Tool Mode: GetMcpTools/CallMcpTool wrapper tools
+      Agent calls GetMcpTools to discover, CallMcpTool to execute.
+      Enabled via mcp_meta_tool_options in ConversationSettings.
+
+2. MCP SERVER TYPES:
+   a) Stdio (command-based): Local process via StdioClientTransport
+   b) StreamableHTTP (remote): HTTP+SSE via StreamableHTTPClientTransport with OAuth
+   c) HTTP tools from file: Static tool definitions passed by Cursor IDE
+
+3. LAYERED PERMISSIONS:
+   - DaemonPermissionsService: Permissive (cloud exec-daemon)
+   - InteractivePermissionsService: Full interactive (IDE)
+   - Team admin controls overlay
+   - Per-tool allowlist/denylist
+
+4. HOOKS COMPATIBILITY:
+   - Native Cursor hooks (hooks.json format)
+   - Claude Code hooks (settings.json format, auto-transformed)
+   - Deduplication between the two
+   - Multiple config sources: enterprise, team, user, project
+   - Both command-based and prompt-based hooks
+
+5. PLUGIN ECOSYSTEM:
+   - CCPluginIdentifier: marketplace, github, local, url sources
+   - Plugin manifests define: commands, agents, skills, rules, hooks, mcpServers
+   - Full marketplace infrastructure with CRUD, approval, import from GitHub

@@ -1,0 +1,1004 @@
+================================================================================
+CURSOR EXEC-DAEMON DIFF/EDIT ALGORITHM IMPLEMENTATION
+Source: /exec-daemon/index.js (379,539 lines, bundled webpack)
+Extracted: 2026-03-04
+================================================================================
+
+TABLE OF CONTENTS
+  1. ARCHITECTURE OVERVIEW - Where diffs are applied
+  2. ApplyAgentDiff PROTOBUF DEFINITIONS (agent.v1)
+  3. EditFile PROTOBUF DEFINITIONS (aiserver.v1)
+  4. LocalWriteExecutor - How files are actually written
+  5. FileChangeTracker - Change tracking & undo/revert
+  6. FileState / FileStateStructure - File state tracking
+  7. ConversationState - File states in conversation
+  8. Diff Library - Myers diff algorithm (diff@8.0.2)
+  9. Structured Patch Creation
+  10. Edit Hunk Computation for Hooks
+  11. File Format Detection & Line Ending Normalization
+  12. CursorBlame / AI Attribution Tracking
+  13. UndoEdit System
+  14. Permissions & Approval for Writes
+  15. RecoverableError types for search-replace
+
+================================================================================
+1. ARCHITECTURE OVERVIEW
+================================================================================
+
+KEY INSIGHT: The exec-daemon does NOT implement the search-and-replace diff
+algorithm itself. The architecture splits responsibilities:
+
+- **Server-side (aiserver)**: The LLM outputs tool calls with parameters like
+  `old_string`, `new_string`, `contents`, etc. These are sent as
+  ClientSideToolV2Call protobuf messages (e.g., EDIT_FILE=7, EDIT_FILE_V2=38,
+  APPLY_AGENT_DIFF=50).
+
+- **Client-side (Cursor IDE / exec-daemon)**: For EDIT_FILE/EDIT_FILE_V2,
+  the actual text matching and replacement (search-replace) happens in the
+  Cursor IDE frontend or the aiserver, NOT in the exec-daemon. The daemon
+  receives the final resolved `fileText` and uses `LocalWriteExecutor` to
+  write it to disk.
+
+- **ApplyAgentDiff (tool ID 50)**: A higher-level tool that takes an
+  `agent_id` and applies all accumulated changes from that agent's session.
+  The actual diff resolution happens server-side. The result is a list of
+  `AppliedAgentChange` entries (created/modified/deleted) with before/after
+  content.
+
+- **exec-daemon's role**: File I/O, permission checking, change tracking,
+  line ending normalization, encoding detection, and hooks execution.
+
+The search-and-replace matching logic (old_string -> new_string) with
+whitespace-insensitive fallback and fuzzy matching is implemented in the
+Cursor IDE extension (TypeScript), not in the daemon bundle.
+
+================================================================================
+2. ApplyAgentDiff PROTOBUF DEFINITIONS
+   Source: ../proto/dist/generated/agent/v1/apply_agent_diff_tool_pb.js
+   Lines: ~213235-213498
+================================================================================
+
+-- ApplyAgentDiffToolCall (agent.v1) --
+// @generated from file agent/v1/apply_agent_diff_tool.proto (package agent.v1)
+
+class ApplyAgentDiffToolCall {
+    args;     // agent.v1.ApplyAgentDiffArgs
+    result;   // agent.v1.ApplyAgentDiffResult
+    static typeName = "agent.v1.ApplyAgentDiffToolCall";
+    // Fields: args (ApplyAgentDiffArgs), result (ApplyAgentDiffResult)
+}
+
+-- ApplyAgentDiffArgs --
+class ApplyAgentDiffArgs {
+    agentId = "";   // string: The agent ID whose changes to apply
+    static typeName = "agent.v1.ApplyAgentDiffArgs";
+    // Only field: agent_id (string)
+}
+
+-- ApplyAgentDiffResult --
+class ApplyAgentDiffResult {
+    result = { case: undefined };  // oneof: success | error
+    static typeName = "agent.v1.ApplyAgentDiffResult";
+    // Oneof "result":
+    //   1: success -> ApplyAgentDiffSuccess
+    //   2: error   -> ApplyAgentDiffError
+}
+
+-- ApplyAgentDiffSuccess --
+class ApplyAgentDiffSuccess {
+    appliedChanges = [];  // repeated AppliedAgentChange
+    static typeName = "agent.v1.ApplyAgentDiffSuccess";
+}
+
+-- AppliedAgentChange --
+class AppliedAgentChange {
+    path = "";                    // string: File path
+    changeType = UNSPECIFIED;     // AppliedAgentChange.ChangeType enum
+    beforeContent;                // optional string: Content before change
+    afterContent;                 // optional string: Content after change
+    error;                        // optional string: Error if change failed
+    messageForModel;              // optional string: e.g. "Successfully deleted file: path (123 bytes)"
+    static typeName = "agent.v1.AppliedAgentChange";
+}
+
+-- AppliedAgentChange.ChangeType Enum --
+enum AppliedAgentChange_ChangeType {
+    CHANGE_TYPE_UNSPECIFIED = 0,
+    CHANGE_TYPE_CREATED = 1,
+    CHANGE_TYPE_MODIFIED = 2,
+    CHANGE_TYPE_DELETED = 3,
+}
+
+-- ApplyAgentDiffError --
+class ApplyAgentDiffError {
+    error = "";                   // string: Error message
+    appliedChanges = [];          // repeated AppliedAgentChange (partial results)
+    static typeName = "agent.v1.ApplyAgentDiffError";
+}
+
+-- ApplyAgentDiffParams (aiserver.v1, for ClientSideToolV2Call) --
+// Lines: ~265966-265992
+class ApplyAgentDiffParams {
+    agentId = "";    // string: Agent ID to apply diff for
+    static typeName = "aiserver.v1.ApplyAgentDiffParams";
+    // This is the params variant in ClientSideToolV2Call.params oneof (field 63)
+}
+
+// The result is sent back as apply_agent_diff_result (field 63) in
+// ClientSideToolV2Result, using ApplyAgentDiffResult from agent.v1.
+
+================================================================================
+3. EditFile PROTOBUF DEFINITIONS
+   Source: aiserver/v1 protobuf definitions
+   Lines: ~267275-267704
+================================================================================
+
+-- EditFileParams (aiserver.v1) --
+// This is what the LLM/server sends to the client for search-and-replace edits
+class EditFileParams {
+    relativeWorkspacePath = "";   // field 1: Target file path
+    language = "";                // field 2: File language
+    blocking = false;             // field 4: Whether to block until applied
+    contents = "";                // field 3: Full file contents (for speculative edit)
+    instructions;                 // field 5: optional string - Edit instructions
+    shouldEditFileFailForLargeFiles; // field 12: optional bool
+
+    // --- Search-and-replace arguments ---
+    oldString;                    // field 6: optional string - Text to find
+    newString;                    // field 7: optional string - Replacement text
+    allowMultipleMatches;         // field 8: optional bool - Allow replacing all matches
+    useWhitespaceInsensitiveFallback; // field 10: optional bool - Try whitespace-insensitive match
+    useDidYouMeanFuzzyMatch;      // field 11: optional bool - Try fuzzy matching
+    gracefullyHandleRecoverableErrors; // field 16: optional bool
+
+    // --- Line range hints ---
+    lineRanges = [];              // field 9: repeated LineRange - Estimated line ranges for search
+
+    // --- Notebook editing ---
+    notebookCellIdx;              // field 13: optional int32
+    isNewCell;                    // field 14: optional bool
+    cellLanguage;                 // field 15: optional string
+
+    editCategory;                 // field 17: optional string ("fix_linter_error" / "other")
+    shouldEagerlyProcessLints;    // field 18: optional bool
+
+    static typeName = "aiserver.v1.EditFileParams";
+}
+
+-- EditFileResult (aiserver.v1) --
+class EditFileResult {
+    diff;                           // EditFileResult.FileDiff
+    isApplied = false;              // bool
+    applyFailed = false;            // bool
+    linterErrors = [];              // repeated LinterError
+    rejected;                       // optional bool
+    numMatches;                     // optional int32 - Number of search matches found
+    whitespaceInsensitiveFallbackFoundMatch;  // optional bool
+    noMatchFoundInLineRanges;       // optional bool
+    recoverableError;               // optional RecoverableError
+    numLinesInFile;                 // optional int32 - Lines before edit
+    isSubagentEdit;                 // optional bool
+    diffBecameNoOpDueToOnSaveFixes; // optional bool
+    humanReview;                    // deprecated
+    humanFeedback;                  // deprecated
+    shouldEagerlyProcessLints;      // optional bool
+    humanReviewV2;                  // optional HumanReview
+    wereAllNewLinterErrorsResolvedByThisEdit; // optional bool
+    static typeName = "aiserver.v1.EditFileResult";
+}
+
+-- EditFileResult.FileDiff --
+class EditFileResult_FileDiff {
+    chunks = [];        // repeated ChunkDiff
+    editor = UNSPECIFIED; // Editor enum (AI=1, HUMAN=2)
+    hitTimeout = false;   // bool
+    static typeName = "aiserver.v1.EditFileResult.FileDiff";
+}
+
+-- EditFileResult.FileDiff.Editor Enum --
+enum EditFileResult_FileDiff_Editor {
+    EDITOR_UNSPECIFIED = 0,
+    EDITOR_AI = 1,
+    EDITOR_HUMAN = 2,
+}
+
+-- EditFileResult.FileDiff.ChunkDiff --
+class EditFileResult_FileDiff_ChunkDiff {
+    diffString = "";    // The unified diff format string
+    oldStart = 0;       // 1-indexed
+    newStart = 0;       // 1-indexed
+    oldLines = 0;
+    newLines = 0;
+    linesRemoved = 0;   // Number of - lines
+    linesAdded = 0;     // Number of + lines
+    static typeName = "aiserver.v1.EditFileResult.FileDiff.ChunkDiff";
+}
+
+-- RecoverableError types --
+enum EditFileResult_RecoverableError_RecoverableErrorType {
+    RECOVERABLE_ERROR_TYPE_UNSPECIFIED = 0,
+    RECOVERABLE_ERROR_TYPE_SEARCH_STRING_NOT_FOUND = 1,
+    RECOVERABLE_ERROR_TYPE_AMBIGUOUS_SEARCH_STRING = 2,
+}
+
+-- Error detail types --
+class ToolResultError_EditFileError {
+    numLinesInFileBeforeEdit = 0;  // int32
+    static typeName = "aiserver.v1.ToolResultError.EditFileError";
+}
+
+class ToolResultError_SearchReplaceError {
+    numLinesInFileBeforeEdit = 0;  // int32
+    static typeName = "aiserver.v1.ToolResultError.SearchReplaceError";
+}
+
+// ToolResultError includes:
+//   field 1: client_visible_error_message (string)
+//   field 2: model_visible_error_message (string)
+//   field 3: actual_error_message_only_send_from_client_to_server_never_the_other_way_around_because_that_may_be_a_security_risk (optional string)
+//   field 5: edit_file_error_details (EditFileError, oneof)
+//   field 6: search_replace_error_details (SearchReplaceError, oneof)
+
+================================================================================
+4. LocalWriteExecutor - How files are actually written
+   Source: ../local-exec/dist/write.js
+   Lines: ~349665-349955
+================================================================================
+
+const write_logger = createLogger("LocalWriteExecutor");
+
+class LocalWriteExecutor {
+    fileChangeTracker;
+    permissionsService;
+    pendingDecisionProvider;
+    workspacePaths;
+    workspacePath;
+    worktreeMainPath;
+    onWriteForAiTracking;    // Callback for cursor-blame
+
+    constructor(fileChangeTracker, permissionsService, pendingDecisionProvider,
+                { workspacePaths, workspacePath, worktreeMainPath, onWriteForAiTracking }) {
+        // Store all dependencies
+    }
+
+    async execute(parentCtx, args) {
+        // args.path:      Target file path
+        // args.fileText:  Content to write
+        // args.fileBytes: Binary data (if non-empty, skip text processing)
+        // args.toolCallId: For tracking
+        // args.returnFileContentAfterWrite: bool
+
+        const resolvedPath = resolvePath(path, this.workspacePath);
+
+        // 1. Skip agent tracking for internal paths (agent-tools, swarm-agents)
+        const shouldSkipAgentTracking = isCursorProjectsInternalPath(resolvedPath, [
+            "agent-tools", "swarm-agents"
+        ]);
+
+        // 2. Block worktree paths
+        if (shouldBlockWorktreePath({targetPath, workspacePaths, mainWorktreePath})) {
+            return WriteResult { case: "error", value: WORKTREE_GUARD_ERROR };
+        }
+
+        // 3. Read existing content for change tracking
+        let beforeContent;
+        try {
+            beforeContent = await readText(resolvedPath);
+        } catch { /* File doesn't exist */ }
+
+        // 4. Check permissions (may require user approval)
+        const shouldBlock = await permissionsService.shouldBlockWrite(ctx, resolvedPath, fileText);
+        if (shouldBlock) {
+            // Handle: needsApproval -> requestApproval()
+            //         userRejected -> WriteRejected
+            //         permissionDenied -> WritePermissionDenied
+        }
+
+        // 5. Ensure parent directory exists
+        await mkdir(dir, { recursive: true });
+
+        // 6. Prepare buffer with line ending normalization
+        if (fileBytes !== undefined) {
+            buffer = fileBytes;  // Binary mode
+            lines = 0;
+        } else {
+            // Text mode: detect encoding, normalize line endings
+            const textResult = await getBufferForWrite(resolvedPath, fileText, workspacePath);
+            buffer = textResult.buffer;
+            lines = textResult.lines;
+        }
+
+        // 7. Write file with fsync
+        await writeFile(resolvedPath, buffer, { flush: true });
+        // Also sync the directory (best effort)
+        dirHandle = await open(dirname(resolvedPath), O_RDONLY);
+        await dirHandle.sync();
+
+        // 8. Track change in FileChangeTracker
+        if (fileChangeTracker && fileBytes === undefined && !shouldSkipAgentTracking) {
+            await fileChangeTracker.trackChange(resolvedPath, beforeContent, fileText, metadata);
+        }
+
+        // 9. Call AI code tracking for cursor-blame (best-effort)
+        if (onWriteForAiTracking && fileBytes === undefined && !shouldSkipAgentTracking) {
+            await onWriteForAiTracking({
+                path: resolvedPath,
+                beforeContent,
+                afterContent: fileText,
+                metadata: { toolCallId },
+            });
+        }
+
+        // 10. Optionally re-read file content after write
+        if (args.returnFileContentAfterWrite) {
+            fileContentAfterWrite = await readText(resolvedPath);
+        }
+
+        return WriteResult {
+            case: "success",
+            value: WriteSuccess { path, linesCreated, fileSize, fileContentAfterWrite }
+        };
+    }
+}
+
+================================================================================
+5. FileChangeTracker - Change tracking & undo/revert
+   Source: Lines ~328180-328330
+================================================================================
+
+class FileChangeTracker {
+    workspacePath;
+    changes = new Map();    // Map<path, { path, before, after, metadata }>
+    listeners = new Set();  // Set<Function> for change notifications
+
+    constructor(workspacePath) {
+        this.workspacePath = workspacePath;
+    }
+
+    // Subscribe to change notifications. Returns unsubscribe function.
+    subscribe(listener) {
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+    }
+
+    notify(change) {
+        for (const listener of this.listeners) listener(change);
+    }
+
+    // Core tracking method
+    async trackChange(path, before, after, metadata) {
+        const existingChange = this.changes.get(path);
+        if (existingChange) {
+            // MERGE: Keep original "before" state (from first change)
+            const originalBefore = existingChange.before;
+            const mergedMetadata = metadata || existingChange.metadata;
+
+            // Check for NO NET CHANGE
+            if (originalBefore === after ||
+                (originalBefore === undefined && after === undefined)) {
+                // Net change is zero - remove from tracking
+                this.changes.delete(path);
+                this.notify();
+            } else {
+                // Update with merged state
+                this.changes.set(path, { path, before: originalBefore, after, metadata: mergedMetadata });
+                this.notify(change);
+            }
+        } else {
+            // New change
+            this.changes.set(path, { path, before, after, metadata });
+            this.notify(change);
+        }
+    }
+
+    getChanges()      // Returns Array of all changes
+    getChange(path)   // Get specific change
+    hasChange(path)   // Check if path has pending changes
+
+    // Accept: Remove from tracker (keep file as-is)
+    accept(path) {
+        this.changes.delete(path);
+        this.notify(change);
+    }
+    acceptAll() {
+        this.changes.clear();
+        this.notify();
+    }
+
+    // Reject: REVERT file to original state, then remove from tracker
+    async reject(path) {
+        const change = this.changes.get(path);
+        if (!change) return;
+        try {
+            if (change.before === undefined && change.after !== undefined) {
+                // File was CREATED -> DELETE it
+                await unlink(path);
+            } else if (change.before !== undefined && change.after === undefined) {
+                // File was DELETED -> RECREATE it
+                await writeText(path, change.before, workspacePath);
+            } else if (change.before !== undefined && change.after !== undefined) {
+                // File was MODIFIED -> RESTORE original content
+                await writeText(path, change.before, workspacePath);
+            }
+        } catch { /* Silently ignore revert errors */ }
+        finally {
+            this.changes.delete(path);
+            this.notify(change);
+        }
+    }
+
+    async rejectAll() {
+        const paths = Array.from(this.changes.keys());
+        await Promise.all(paths.map(path => this.reject(path)));
+    }
+
+    clear() {
+        this.changes.clear();  // No revert, just clear tracking
+    }
+}
+
+================================================================================
+6. FileState / FileStateStructure - File state tracking
+   Source: Lines ~210302-210380
+================================================================================
+
+-- FileState (agent.v1) - String-based --
+class FileState {
+    content;          // optional string: Current content (undefined = deleted)
+    initialContent;   // optional string: Content when tracking began (undefined = didn't exist)
+    static typeName = "agent.v1.FileState";
+}
+
+-- FileStateStructure (agent.v1) - Bytes-based --
+class FileStateStructure {
+    content;          // optional bytes: Current content (undefined = deleted)
+    initialContent;   // optional bytes: Content when tracking began (undefined = didn't exist)
+    static typeName = "agent.v1.FileStateStructure";
+}
+
+// FileState uses strings (for inline conversation state)
+// FileStateStructure uses bytes (for efficient blob storage in ConversationStateStructure)
+
+================================================================================
+7. ConversationState - File states in conversation
+   Source: Lines ~210416-210688
+================================================================================
+
+-- ConversationState (agent.v1) --
+class ConversationState {
+    rootPromptMessagesJson = [];  // repeated string
+    turns = [];                   // repeated ConversationTurn
+    todos = [];                   // repeated TodoItem
+    pendingToolCalls = [];        // repeated string (JSON)
+    tokenDetails;                 // ConversationTokenDetails
+    summary;                      // optional ConversationSummary
+    plan;                         // optional ConversationPlan
+    summaryArchive;               // deprecated
+    fileStates = {};              // map<string, FileState> - PATH -> STATE
+    summaryArchives = [];         // repeated ConversationSummaryArchive
+}
+
+-- ConversationStateStructure (agent.v1) --
+// Efficient storage format for persistence
+class ConversationStateStructure {
+    rootPromptMessagesJson = [];  // repeated bytes
+    turns = [];                   // repeated bytes (serialized)
+    todos = [];                   // repeated bytes
+    pendingToolCalls = [];        // repeated string
+    tokenDetails;                 // ConversationTokenDetails
+    summary;                      // optional bytes
+    plan;                         // optional bytes
+    previousWorkspaceUris = [];   // repeated string
+    mode;                         // optional AgentMode
+    fileStates = {};              // DEPRECATED map<string, bytes>
+    fileStatesV2 = {};            // map<string, FileStateStructure> - Current version
+    summaryArchives = [];         // repeated bytes
+    turnTimings = [];             // repeated StepTiming
+    subagentStates = {};          // map<string, SubagentPersistedState>
+    selfSummaryCount = 0;         // uint32
+    readPaths = [];               // repeated string - Files read during conversation
+}
+
+// Also used for checkpoints:
+// ConvertOALToNALResponse contains:
+//   bubbleCheckpoints: map<string, ConversationStateStructure>
+//   (Key = bubble_id, allows resubmission from any human bubble)
+
+================================================================================
+8. Diff Library - Myers diff algorithm
+   Source: ../../node_modules/.pnpm/diff@8.0.2/node_modules/diff/libesm/diff/base.js
+   Lines: ~372785-372990
+================================================================================
+
+// Cursor uses the standard `diff` npm package (v8.0.2) for computing diffs.
+// This implements the Myers O(ND) diff algorithm with optimizations.
+
+class Diff {
+    diff(oldStr, newStr, options = {}) {
+        const oldString = this.castInput(oldStr, options);
+        const newString = this.castInput(newStr, options);
+        const oldTokens = this.removeEmpty(this.tokenize(oldString, options));
+        const newTokens = this.removeEmpty(this.tokenize(newString, options));
+        return this.diffWithOptionsObj(oldTokens, newTokens, options, callback);
+    }
+
+    diffWithOptionsObj(oldTokens, newTokens, options, callback) {
+        const newLen = newTokens.length, oldLen = oldTokens.length;
+        let editLength = 1;
+        let maxEditLength = newLen + oldLen;
+        if (options.maxEditLength != null) {
+            maxEditLength = Math.min(maxEditLength, options.maxEditLength);
+        }
+        const maxExecutionTime = options.timeout ?? Infinity;
+        const abortAfterTimestamp = Date.now() + maxExecutionTime;
+
+        const bestPath = [{ oldPos: -1, lastComponent: undefined }];
+
+        // Seed editLength = 0 (content starts with same values)
+        let newPos = this.extractCommon(bestPath[0], newTokens, oldTokens, 0, options);
+        if (bestPath[0].oldPos + 1 >= oldLen && newPos + 1 >= newLen) {
+            return done(this.buildValues(bestPath[0].lastComponent, newTokens, oldTokens));
+        }
+
+        // Optimization: track min/max diagonal to prune search space
+        let minDiagonalToConsider = -Infinity, maxDiagonalToConsider = Infinity;
+
+        const execEditLength = () => {
+            for (let diagonalPath = Math.max(minDiagonalToConsider, -editLength);
+                 diagonalPath <= Math.min(maxDiagonalToConsider, editLength);
+                 diagonalPath += 2) {
+
+                let basePath;
+                const removePath = bestPath[diagonalPath - 1];
+                const addPath = bestPath[diagonalPath + 1];
+
+                let canAdd = addPath && (addPath.oldPos - diagonalPath) >= 0
+                             && (addPath.oldPos - diagonalPath) < newLen;
+                const canRemove = removePath && removePath.oldPos + 1 < oldLen;
+
+                if (!canAdd && !canRemove) {
+                    bestPath[diagonalPath] = undefined;
+                    continue;
+                }
+
+                // Select diagonal farthest from origin
+                if (!canRemove || (canAdd && removePath.oldPos < addPath.oldPos)) {
+                    basePath = this.addToPath(addPath, true, false, 0, options);
+                } else {
+                    basePath = this.addToPath(removePath, false, true, 1, options);
+                }
+
+                newPos = this.extractCommon(basePath, newTokens, oldTokens, diagonalPath, options);
+
+                if (basePath.oldPos + 1 >= oldLen && newPos + 1 >= newLen) {
+                    return done(this.buildValues(basePath.lastComponent, newTokens, oldTokens));
+                } else {
+                    bestPath[diagonalPath] = basePath;
+                    // Prune diagonals when hitting edges
+                    if (basePath.oldPos + 1 >= oldLen)
+                        maxDiagonalToConsider = Math.min(maxDiagonalToConsider, diagonalPath - 1);
+                    if (newPos + 1 >= newLen)
+                        minDiagonalToConsider = Math.max(minDiagonalToConsider, diagonalPath + 1);
+                }
+            }
+            editLength++;
+        };
+
+        // Sync loop with timeout
+        while (editLength <= maxEditLength && Date.now() <= abortAfterTimestamp) {
+            const ret = execEditLength();
+            if (ret) return ret;
+        }
+    }
+
+    extractCommon(basePath, newTokens, oldTokens, diagonalPath, options) {
+        let oldPos = basePath.oldPos;
+        let newPos = oldPos - diagonalPath;
+        let commonCount = 0;
+        while (newPos + 1 < newLen && oldPos + 1 < oldLen &&
+               this.equals(oldTokens[oldPos + 1], newTokens[newPos + 1], options)) {
+            newPos++; oldPos++; commonCount++;
+        }
+        if (commonCount) {
+            basePath.lastComponent = { count: commonCount, previousComponent: basePath.lastComponent,
+                                       added: false, removed: false };
+        }
+        basePath.oldPos = oldPos;
+        return newPos;
+    }
+
+    equals(left, right, options) {
+        if (options.comparator) return options.comparator(left, right);
+        return left === right || (!!options.ignoreCase && left.toLowerCase() === right.toLowerCase());
+    }
+}
+
+================================================================================
+9. Structured Patch Creation
+   Source: ../../node_modules/.pnpm/diff@8.0.2/node_modules/diff/libesm/patch/create.js
+   Lines: ~373107-373233
+================================================================================
+
+function structuredPatch(oldFileName, newFileName, oldStr, newStr,
+                         oldHeader, newHeader, options) {
+    if (options.context === undefined) options.context = 4;
+
+    // Uses diffLines() to compute line-level diff
+    const diff = diffLines(oldStr, newStr, options);
+
+    // Build hunks from diff results
+    const hunks = [];
+    let oldRangeStart = 0, newRangeStart = 0, curRange = [];
+    let oldLine = 1, newLine = 1;
+
+    for (let i = 0; i < diff.length; i++) {
+        const current = diff[i];
+        const lines = current.lines || splitLines(current.value);
+
+        if (current.added || current.removed) {
+            // Track range start
+            if (!oldRangeStart) {
+                oldRangeStart = oldLine;
+                newRangeStart = newLine;
+                // Include context lines from previous chunk
+                curRange = context > 0 ? contextLines(prev.lines.slice(-context)) : [];
+            }
+            // Add +/- lines
+            for (const line of lines) {
+                curRange.push((current.added ? '+' : '-') + line);
+            }
+        } else {
+            // Context lines - close hunk or continue
+            if (oldRangeStart) {
+                if (lines.length <= context * 2 && i < diff.length - 2) {
+                    // Overlapping - merge hunks
+                } else {
+                    // Close hunk
+                    hunks.push({ oldStart, oldLines, newStart, newLines, lines: curRange });
+                }
+            }
+        }
+    }
+
+    return { oldFileName, newFileName, oldHeader, newHeader, hunks };
+}
+
+// Used in two places:
+// 1. Permission checking: compute diff for approval dialogs (context: 2)
+//    Line 366506: structuredPatch("a", "b", originalContents, newContents, "", "", { context: 2 })
+// 2. Edit hook computation: compute diff hunks for afterFileEdit hooks (context: 0)
+//    Line 373332: create_structuredPatch("", "", oldContent, newContent, "", "", { context: 0 })
+
+================================================================================
+10. Edit Hunk Computation for Hooks
+    Source: ../hooks-exec/dist/tool-hook-executors/write.js
+    Lines: ~373318-373484
+================================================================================
+
+// Size threshold: 256KB (matches rest of codebase)
+const DIFF_SIZE_THRESHOLD_BYTES = 256 * 1024;
+
+// Compute edit hunks efficiently (only changed portions, not full content)
+function computeEditHunks(oldContent, newContent) {
+    const patch = structuredPatch("", "", oldContent, newContent, "", "", {
+        context: 0,  // No context lines - just the changes
+    });
+
+    if (patch.hunks.length === 0) return [];
+
+    return patch.hunks.map(hunk => {
+        const oldLines = [];
+        const newLines = [];
+        for (const line of hunk.lines) {
+            if (line.startsWith("-")) oldLines.push(line.slice(1));
+            else if (line.startsWith("+")) newLines.push(line.slice(1));
+        }
+        return {
+            old_string: oldLines.join("\n"),
+            new_string: newLines.join("\n"),
+        };
+    });
+}
+
+// WriteExecutor hooks configuration
+function createWriteHooksConfig(hookExecutor, preWriteStateMap) {
+    return {
+        toolName: HooksToolName.Write,
+
+        // Pre-execution: Read file content before write (skip for large files)
+        runPreExecutionHooks: async ({ args, toolUseId }) => {
+            let contentBeforeWrite;
+            let fileTooLarge = false;
+            try {
+                const stats = await stat(args.path);
+                if (stats.size > DIFF_SIZE_THRESHOLD_BYTES) {
+                    fileTooLarge = true;
+                } else {
+                    contentBeforeWrite = await readText(args.path);
+                }
+            } catch { /* File doesn't exist yet */ }
+            preWriteStateMap.set(toolUseId, { contentBeforeWrite, fileTooLarge });
+        },
+
+        // Post-execution: Compute edits and fire afterFileEdit hook
+        runPostExecutionHooks: async ({ args, result, baseHookRequest, toolUseId }) => {
+            const { contentBeforeWrite, fileTooLarge } = preWriteStateMap.get(toolUseId) ?? {};
+
+            let edits;
+            if (fileTooLarge) {
+                // Large files: empty old_string to avoid memory issues
+                edits = [{ old_string: "", new_string: args.fileText }];
+            } else if (contentBeforeWrite === undefined) {
+                // New file
+                edits = [{ old_string: "", new_string: args.fileText }];
+            } else if (contentBeforeWrite === args.fileText) {
+                // No changes
+                edits = [];
+            } else {
+                // Compute diff hunks
+                edits = computeEditHunks(contentBeforeWrite, args.fileText);
+            }
+
+            // Fire afterFileEdit hook with computed edits
+            await hookExecutor.executeHookForStep(
+                HookStep.afterFileEdit,
+                { ...baseHookRequest, file_path: args.path, edits }
+            );
+        },
+
+        // Cleanup stored pre-write state
+        runCleanup: (toolUseId) => preWriteStateMap.delete(toolUseId),
+    };
+}
+
+================================================================================
+11. File Format Detection & Line Ending Normalization
+    Source: Lines ~327120-327310
+================================================================================
+
+-- Reading text files --
+async function readText(file) {
+    const buf = await readFile(file);
+    const format = getFormatForBuffer(buf);
+    if (format.isBinaryFile) throw new Error("Binary file cannot be decoded as text");
+
+    const encodingToUse = cachedEncoding || format.encoding;
+    const { text, encoding } = decodeBufferWithEncoding(buf, encodingToUse);
+    const str = stripUtf8Bom(text);
+
+    // NORMALIZE: CRLF -> LF on read
+    if (format.lineEnding === LineEnding.CRLF) {
+        return str.replaceAll("\r\n", "\n");
+    }
+    return str;
+}
+
+-- Writing text files --
+async function getBufferForWrite(file, content, workspaceRoot) {
+    let format = await getBestFormatForPath(file, workspaceRoot);
+    // Falls back through: getFormatForFile -> getFormatForWorkspace -> getDefaultTextFormatForOS
+
+    const lines = countLines(content);
+
+    // DENORMALIZE: LF -> CRLF on write (if file originally had CRLF)
+    if (format.lineEnding === LineEnding.CRLF) {
+        content = content.replaceAll("\n", "\r\n");
+    }
+
+    // Binary files: base64 decode
+    if (format.encoding === "binary") {
+        return { lines, buffer: decodeBinaryContent(content), format };
+    }
+
+    // Text files: encode with detected encoding
+    return { lines, buffer: encode(content, format.encoding), format };
+}
+
+-- Format detection --
+function getFormatForBuffer(header) {
+    // 1. Check for UTF-16 (LE/BE) via BOM
+    // 2. Check for UTF-32 (LE/BE)
+    // 3. Check if binary (null bytes etc.)
+    // 4. Use jschardet for encoding detection (confidence > 0.7)
+    // 5. Detect line endings (CRLF vs LF)
+    // 6. Default: UTF-8 + LF
+}
+
+-- Workspace format consensus --
+async function getFormatForWorkspace(workspaceRoot) {
+    // Sample up to 100 files to find consensus encoding + line ending
+    // Requires 3 matching files for a given format
+    const MAX_FILES_TO_CHECK = 100;
+    // Tracks: "encoding:lineEnding" -> count
+}
+
+================================================================================
+12. CursorBlame / AI Attribution Tracking
+    Source: Lines ~298801-298831, 349900-349920
+================================================================================
+
+-- CursorBlameSettings (aiserver.v1) --
+class CursorBlameSettings {
+    enabled = false;  // bool: Enable Cursor Blame feature for all team members
+    static typeName = "aiserver.v1.CursorBlameSettings";
+}
+
+// CursorBlameSettings appears in:
+//   - AgentSettings.cursorBlameSettings (field 25)
+//   - AgentSettingsV2.cursorBlameSettings (field 26)
+
+-- AI Tracking in LocalWriteExecutor --
+// Line 349900-349920 (inside execute() method):
+// Call AI code tracking callback for cursor-blame (text writes only).
+// Best-effort: do not fail the write if tracking throws.
+if (this.onWriteForAiTracking && fileBytes === undefined && !shouldSkipAgentTracking) {
+    try {
+        await this.onWriteForAiTracking({
+            path: resolvedPath,
+            beforeContent,
+            afterContent: fileText,
+            metadata: { toolCallId },
+        });
+    } catch (err) {
+        write_logger.warn(ctx, "onWriteForAiTracking failed (write succeeded)", {
+            path: resolvedPath,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+}
+
+-- Attribution in Request Context (Lines ~348200-348244) --
+// Get attribution settings from config if available
+const config = this.attributionConfigProvider?.get();
+const attributeCommitsToAgent = attributionDisabledByAdmin
+    ? false
+    : (config?.attribution?.attributeCommitsToAgent ?? true);  // DEFAULT: true
+const attributePRsToAgent = attributionDisabledByAdmin
+    ? false
+    : (config?.attribution?.attributePRsToAgent ?? true);       // DEFAULT: true
+
+// Sent in RequestContext:
+//   commitAttributionMessage: attributeCommitsToAgent ? "enabled" : undefined,
+//   prAttributionMessage: attributePRsToAgent ? "enabled" : undefined,
+
+// AI_ATTRIBUTION tool (tool ID 59) exists for explicit attribution control.
+
+================================================================================
+13. UndoEdit System
+    Source: Lines ~271312-271456
+================================================================================
+
+-- UndoEditParams (aiserver.v1) --
+class UndoEditParams {
+    // Empty message - "for now, no arguments here. we just undo the latest edit"
+    static typeName = "aiserver.v1.UndoEditParams";
+}
+
+-- UndoEditResult (aiserver.v1) --
+class UndoEditResult {
+    feedback = [];              // repeated string (e.g., linter errors)
+    relativeWorkspacePath = ""; // string: Which file was reverted
+    contextStartLineNumber = 0; // int32: Start of context window
+    contextLines = [];          // repeated string: Change context (+/- 5 lines)
+    contextTotalNumLines = 0;   // int32
+    fileTotalLines = 0;         // int32
+    static typeName = "aiserver.v1.UndoEditResult";
+}
+
+// UndoEdit is a ClientSideToolV2 (field 6 in params/results oneof)
+// The actual undo logic uses FileChangeTracker.reject() to revert
+// the most recent change.
+
+================================================================================
+14. Permissions & Approval for Writes
+    Source: Lines ~366490-366570
+================================================================================
+
+// Before writing, the permissions service checks if the write should be blocked.
+// For out-of-workspace writes, a diff is computed for the approval dialog:
+
+const getIsNewFileAndDiffString = async () => {
+    let isNewFile = false;
+    let originalContents = "";
+    try {
+        originalContents = await readText(absolutePath);
+    } catch { isNewFile = true; }
+
+    let diffString = "";
+    if (isNewFile) {
+        diffString = newContents;
+    } else {
+        const ensureNL = (s) => (s.endsWith("\n") ? s : `${s}\n`);
+        const { hunks } = structuredPatch("a", "b",
+            ensureNL(originalContents), ensureNL(newContents), "", "", { context: 2 });
+        diffString = hunks
+            .map(h => h.lines
+                .map(line => line.length > 0 ? `${line[0]} ${line.slice(1)}` : line)
+                .join("\n"))
+            .join("\n...\n");
+    }
+    return { isNewFile, diffString };
+};
+
+// Allowed without approval:
+// - Standard tmp directories
+// - Internal agent data paths (agent-notes, agent-tools, swarm-agents)
+// - .md/.mdc/.cursorrules files anywhere in ~/.cursor/
+// - Cursor worktree paths (but still checked for protected paths)
+
+================================================================================
+15. StringReplacement (used in UpdateProject)
+    Source: Lines ~287444-287481
+================================================================================
+
+-- StringReplacement (aiserver.v1) --
+class StringReplacement {
+    oldString = "";   // The old string to replace
+    newString = "";   // The new string to replace it with
+    static typeName = "aiserver.v1.StringReplacement";
+}
+
+-- UpdateProjectParams --
+class UpdateProjectParams {
+    stringReplacements = [];  // repeated StringReplacement - Multiple replacements to apply
+    summary = "";             // string - Summary of what was accomplished
+    static typeName = "aiserver.v1.UpdateProjectParams";
+}
+
+================================================================================
+SUMMARY: WHAT THE LLM OUTPUTS vs WHAT GETS APPLIED
+================================================================================
+
+The LLM outputs two types of edit instructions:
+
+1. **EditFile (search-and-replace)**: The LLM outputs:
+   - `relative_workspace_path`: Target file
+   - `old_string`: Text to find in the file
+   - `new_string`: Replacement text
+   - Optional: `allow_multiple_matches`, `use_whitespace_insensitive_fallback`,
+     `use_did_you_mean_fuzzy_match`, `line_ranges`
+
+   The Cursor IDE/aiserver resolves the search-replace match. The exec-daemon
+   receives the FINAL resolved `fileText` and writes it via LocalWriteExecutor.
+   The search-replace matching algorithm (including whitespace-insensitive
+   fallback and fuzzy matching) is NOT in the exec-daemon bundle.
+
+2. **ApplyAgentDiff**: The LLM outputs:
+   - `agent_id`: Which agent's accumulated changes to apply
+   The server resolves all pending changes and returns per-file
+   AppliedAgentChange entries (created/modified/deleted with before/after).
+
+3. **EditFile (speculative/full content)**: The LLM outputs:
+   - `contents`: Full new file contents
+   - `instructions`: What to change
+   The Cursor IDE applies a speculative edit model to generate the diff.
+
+The exec-daemon's diff computation (Myers algorithm via `diff@8.0.2`) is used
+ONLY for:
+- Computing unified diff strings for approval dialogs
+- Computing edit hunks for afterFileEdit hooks
+- NOT for applying edits (that happens in the IDE or server)
+
+================================================================================
+KEY FILES IN THE BUNDLE
+================================================================================
+
+Protobuf definitions:
+  - ../proto/dist/generated/agent/v1/apply_agent_diff_tool_pb.js (line 213235)
+  - aiserver.v1 EditFileParams/Result (line 267275)
+  - aiserver.v1 UndoEditParams/Result (line 271312)
+  - aiserver.v1 CursorBlameSettings (line 298801)
+
+Runtime executors:
+  - LocalWriteExecutor (line 349665)
+  - FileChangeTracker (line 328180)
+  - File format utils (line 327120)
+
+Diff library:
+  - diff@8.0.2 Diff base class (line 372785)
+  - structuredPatch (line 373109)
+  - computeEditHunks (line 373331)
+
+Hooks:
+  - WriteExecutorWithHooks (line 373488)
+  - createWriteHooksConfig (line 373362)
