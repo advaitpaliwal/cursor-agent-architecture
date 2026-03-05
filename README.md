@@ -38,6 +38,15 @@ Reverse-engineered from inside a live Cursor Background Agent sandbox (March 202
 - [Sandbox Verification](#sandbox-verification)
 - [Evidence Sources](#evidence-sources)
 - [Protocol and Runtime Findings](#protocol-and-runtime-findings)
+- [Deep Extraction Findings](#deep-extraction-findings)
+  - [StreamUnifiedChatRequest](#streamunifiedchatrequest-63-fields)
+  - [Tool Execution Hooks](#tool-execution-hooks-pretooluse--posttooluse)
+  - [Client-Side Continuation Loop](#client-side-continuation-loop)
+  - [Agent Loop Protocol](#agent-loop-protocol-agentrunrequest--interactionupdate)
+  - [Computer Use Implementation](#computer-use-implementation-x11-desktop-control)
+  - [Sandbox Policy Deep Dive](#sandbox-policy-deep-dive)
+  - [Credential Flow Architecture](#credential-flow-architecture)
+  - [Transcript System](#transcript-system)
 - [Raw Command Log](#raw-command-log)
 
 ---
@@ -2179,40 +2188,192 @@ At `~/.cursor/agent-hooks/`:
 - UPDATE_CURSOR_SETTINGS_CONTENT (114 lines)
 - SHELL_COMMAND_CONTENT (18 lines)
 
+---
+
+## Deep Extraction Findings
+
+These findings come from reverse-engineering the exec-daemon webpack bundle internals. Full details in the linked files.
+
+### StreamUnifiedChatRequest (63 Fields)
+
+> See [`exec-daemon-code/stream-unified-chat-request.txt`](exec-daemon-code/stream-unified-chat-request.txt)
+
+The main LLM request message sent from exec-daemon to the aiserver. 63 fields (numbered 1–93 with gaps) across 9 categories:
+
+**Key fields:**
+- `unifiedMode` (field 46): enum — `CHAT=1, AGENT=2, EDIT=3, CUSTOM=4, PLAN=5, DEBUG=6`
+- `thinkingLevel` (field 49): enum — `MEDIUM=1, HIGH=2`
+- `enableYoloMode` (field 31) + `yoloPrompt` (field 32): auto-approve all tool calls
+- `isSpecMode` (field 77): specification-driven development mode
+- `contextBankSessionId` (field 40) + `contextBankEncryptionKey` (field 43): encrypted conversation cache in Redis
+- `bestOfNGroupId` (field 91) + `tryUseBestOfNPromotion` (field 92): A/B testing with `FreeBestOfNPromotion` (trials_used/trials_remaining)
+- `customPlanningInstructions` (field 84): user-provided plan mode instructions
+- `shouldSpeculativelyRouteGpt5` (field 73): **DEPRECATED** — was used for GPT-5 effort routing experiment
+
+**Model routing:** Client only has `"gpt-5"` as fallback. `RequestedModel.is_variant_string_representation` (field 8) indicates server-side resolution to specific model variants (e.g., GPT-5.3) via `ModelVariantConfig`.
+
+### Tool Execution Hooks (PreToolUse / PostToolUse)
+
+> See [`exec-daemon-code/tool-execution-hooks.txt`](exec-daemon-code/tool-execution-hooks.txt)
+
+**Lifecycle:** Tool Call Request → PreToolUseRequestQuery → Execute → PostToolUseRequestQuery → Result
+
+**PreToolUse hooks** run BEFORE a tool executes and can:
+- `permission`: `"allow"`, `"deny"`, or `"ask"` (prompt user)
+- `updated_input`: **modify tool parameters** before execution (path rewriting, argument sanitization)
+- `agent_message`: inject context into the agent's conversation
+
+**PostToolUse hooks** run AFTER and can inject `additional_context` (e.g., lint errors after file edits).
+
+Both hooks receive: `tool_name`, `tool_input`, `tool_use_id`, `cwd`, `conversation_id`, `generation_id`, `model`.
+
+### Client-Side Continuation Loop
+
+> See [`exec-daemon-code/tool-execution-hooks.txt`](exec-daemon-code/tool-execution-hooks.txt) (section: ClientContinuationConfig)
+
+The agent loop runs on the **client** (exec-daemon), not the server. Configuration:
+
+| Field | Purpose |
+|-------|---------|
+| `idle_threshold` | Consecutive idle iterations before escape |
+| `max_loops` | Hard cap (0 = unlimited) |
+| `nudge_message` | Sent when model produces no tool calls |
+| `escape_message_template` | Contains `{escape_token}` — model must echo to confirm done |
+| `collect_background_children` | Wait for subagent results after loop |
+
+**Escape mechanism:** The `{escape_token}` is **randomly generated per loop** to prevent the model from learning a fixed escape sequence.
+
+### Agent Loop Protocol (AgentRunRequest → InteractionUpdate)
+
+> See [`exec-daemon-code/agent-loop-protocol.txt`](exec-daemon-code/agent-loop-protocol.txt)
+
+**AgentRunRequest** dispatches tasks with: conversation state, model details, MCP tools, skill options, custom system prompt, subagent type.
+
+**ConversationAction** (11 types): `UserMessage`, `Resume`, `Cancel`, `Summarize`, `ShellCommand`, `StartPlan`, `ExecutePlan`, `AsyncAskQuestion`, `CancelSubagent`, `BackgroundTaskCompletion`, `BackgroundShell`.
+
+**InteractionUpdate** (19 streaming types): `TextDelta`, `ThinkingDelta`, `ToolCall`, `ToolResult`, `Error`, `EndTurn`, `Heartbeat`, `TokenUsage`, `SuggestedPrompt`, `PlanUpdate`, `SubagentSpawn`, etc.
+
+### Computer Use Implementation (X11 Desktop Control)
+
+> See [`exec-daemon-code/computer-use-implementation.txt`](exec-daemon-code/computer-use-implementation.txt)
+
+The agent controls the desktop through **xdotool** for input and **ffmpeg** for screenshots:
+
+**11 action types:** `mouse_move`, `click`, `mouse_down`, `mouse_up`, `drag`, `scroll`, `type`, `key`, `wait`, `screenshot`, `cursor_position`
+
+**Screenshot pipeline:**
+```
+ffmpeg -f x11grab -video_size {display_w}x{display_h} -i :{display}
+  -frames:v 1 -vf scale={api_w}:{api_h}
+  -c:v libwebp -preset text -lossless 1 -f webp pipe:1
+```
+Output: base64-encoded WebP with RIFF header patching (ffmpeg can't seek in pipes).
+
+**Coordinate scaling:** Model works in fixed API resolution (e.g., 1280×800). `CoordinateScaler` converts to/from actual display resolution (e.g., 1920×1200).
+
+**Text input:** Typed in batches of `typingBatchSize` chars. Newlines converted to `xdotool key Return`.
+
+**Every invocation returns a screenshot** — if the model didn't request one, a final screenshot is automatically taken.
+
+### Sandbox Policy Deep Dive
+
+> See [`exec-daemon-code/sandbox-and-security-deep.txt`](exec-daemon-code/sandbox-and-security-deep.txt)
+
+**Three-layer policy merge** (lowest → highest priority):
+1. `per_user` — user preferences
+2. `per_repo` — repository `.cursor/settings`
+3. `team_admin` — enterprise admin controls
+
+**Smart Allowlist** uses **Gemini 2.0 Flash** to parse shell commands into `ClassifiedCommand` (name + arguments). Prefix matching with documented limitation: `"npm -y install"` does NOT match `"npm install"` (different arg order).
+
+**Secret Redaction:** `SecretRedactor` with MIN_SECRET_LENGTH=8, streaming carry-buffer pattern prevents partial secret leakage. Per-tool redacting executors for grep, MCP, read, shell output.
+
+**NetworkPolicy:** allow/deny lists, default action (ALLOW or DENY), port ranges, deny event logging with per-run caps.
+
+### Credential Flow Architecture
+
+> See [`artifacts/security/credential-flow-analysis.txt`](artifacts/security/credential-flow-analysis.txt)
+
+Three token types in the sandbox:
+1. **Auth token** (`--auth-token`): 256-bit hex, used for Connect-RPC Bearer auth to exec-daemon
+2. **Trace JWT** (`--trace-auth-token`): issued by `authentication.cursor.sh`, type `exec_daemon`, used for telemetry to `api2.cursor.sh`
+3. **User access token**: Anthropic OAuth (`sk-ant-oat01-*`) in `~/.claude/.credentials.json` + GitHub installation token (`ghs_*`) in `~/.config/gh/hosts.yml`
+
+**Critical design:** The user's Cursor access token (for DashboardService) **never enters the sandbox**. Auth is mediated by the orchestrator.
+
+### Transcript System
+
+> See [`exec-daemon-code/tool-execution-hooks.txt`](exec-daemon-code/tool-execution-hooks.txt) (section: Transcript System)
+
+**HistoryVisibilityMode:**
+- `INTERNAL`: system prompt + first user context + full conversation
+- `EXTERNAL`: skips system prompt and first user message
+
+**Conversation hydration** from blob store: archived messages from `summary_archive.summarized_messages` + current prompt tail from `root_prompt_messages_json`. Long conversations compressed via summary archives.
+
+**Content part types:** text, image, file, reasoning, redacted-reasoning, tool-call, tool-result.
+
 ### Files Index
 ```
 exec-daemon-code/
-├── connect-rpc-services.txt      # 3 gRPC services, 22+ RPCs
-├── exec-protocol.txt             # ExecServerMessage/ExecClientMessage protocol
-├── live-request-context.json     # 265KB live RequestContext capture
-├── secret-scanner-hooks.txt      # Git hook secret scanning system
-├── subagent-system.txt           # Complete subagent protocol
-├── prompt-construction.txt       # Server-side prompt assembly pipeline
-├── tool-implementations.txt      # Tool execution code (sandbox, grep, computer-use)
-├── protobuf-messages.txt         # 17 key protobuf message definitions
-├── diff-algorithm.txt            # ApplyAgentDiff, FileChangeTracker
-├── mcp-and-plugins.txt           # MCP infrastructure + plugin system
-├── skill-prompt-*.txt            # 6 proprietary skill prompt templates
-├── claude-to-cursor-mapping.js   # CLAUDE_TOOL_TO_CURSOR_TOOL translation
-├── client-side-tools-v2.txt      # 53 tool definitions with IDs
-├── builtin-tools.txt             # 20 server-side tools
-├── agent-modes-and-models.txt    # AgentMode, ThinkingStyle, SubagentType
-├── security-and-sandbox.txt      # SandboxPolicy, NetworkPolicy
-├── enterprise-and-billing.txt    # TeamRole, UsageEventKind, SpendType
-├── bugbot-and-integrations.txt   # Bugbot, Linear, Slack integrations
-├── computer-use-enums.txt        # MouseButton, ScrollDirection, ClickType
-├── exec-daemon-cli-flags.txt     # 22 CLI flags + 48 env vars
-└── credential-providers.txt      # Azure, Bedrock credential schemas
+├── stream-unified-chat-request.txt  # StreamUnifiedChatRequest — 63-field LLM request message
+├── tool-execution-hooks.txt         # PreToolUse/PostToolUse hooks, continuation loop, transcript system
+├── computer-use-implementation.txt  # X11 desktop control: xdotool, ffmpeg screenshots, screen recording
+├── sandbox-and-security-deep.txt    # SandboxPolicy merge, Gemini classifier, SecretRedactor, network topology
+├── agent-loop-protocol.txt          # AgentRunRequest, 11 ConversationActions, 19 InteractionUpdates
+├── client-side-tools-v2-calls.txt   # ClientSideToolV2Call — 42 tools with streaming protocol
+├── connect-rpc-services.txt         # 3 gRPC services, 22+ RPCs
+├── exec-protocol.txt                # ExecServerMessage/ExecClientMessage protocol
+├── live-request-context.json        # 265KB live RequestContext capture
+├── secret-scanner-hooks.txt         # Git hook secret scanning system
+├── subagent-system.txt              # Complete subagent protocol
+├── prompt-construction.txt          # Server-side prompt assembly pipeline
+├── tool-implementations.txt         # Tool execution code (sandbox, grep, computer-use)
+├── protobuf-messages.txt            # 17 key protobuf message definitions
+├── diff-algorithm.txt               # ApplyAgentDiff, FileChangeTracker
+├── mcp-and-plugins.txt              # MCP infrastructure + plugin system
+├── skill-prompt-*.txt               # 6 proprietary skill prompt templates
+├── claude-to-cursor-mapping.js      # CLAUDE_TOOL_TO_CURSOR_TOOL translation
+├── client-side-tools-v2.txt         # 53 tool definitions with IDs
+├── builtin-tools.txt                # 20 server-side tools
+├── agent-modes-and-models.txt       # AgentMode, ThinkingStyle, SubagentType
+├── security-and-sandbox.txt         # SandboxPolicy, NetworkPolicy
+├── enterprise-and-billing.txt       # TeamRole, UsageEventKind, SpendType
+├── bugbot-and-integrations.txt      # Bugbot, Linear, Slack integrations
+├── computer-use-enums.txt           # MouseButton, ScrollDirection, ClickType
+├── exec-daemon-cli-flags.txt        # 22 CLI flags + 48 env vars
+└── credential-providers.txt         # Azure, Bedrock credential schemas
 
 binary-analysis/
-├── pod-daemon-analysis.txt       # anyrun.v1.PodDaemonService (2 RPCs)
-├── cursorsandbox-analysis.txt    # 7-step sandbox creation pipeline
-├── polished-renderer-analysis.txt # Video rendering pipeline
-└── isod-analysis.txt             # anyrun.v1.IsodService (10 RPCs)
+├── pod-daemon-analysis.txt          # anyrun.v1.PodDaemonService (2 RPCs)
+├── cursorsandbox-analysis.txt       # 7-step sandbox creation pipeline
+├── polished-renderer-analysis.txt   # Video rendering pipeline
+└── isod-analysis.txt                # anyrun.v1.IsodService (10 RPCs)
 
-artifacts/runtime/network-topology.txt              # IP addresses, DNS, connection map
-artifacts/runtime/docker-in-docker-inspection.json  # Full DinD container config
-artifacts/protocol/all-protobuf-enums.txt           # 100+ enums from agent.v1/aiserver.v1
+artifacts/
+├── protocol/
+│   ├── aiserver-api-catalog.txt     # 1290 aiserver.v1 types
+│   ├── all-grpc-rpcs.txt            # All gRPC RPCs across 4 services
+│   ├── all-protobuf-enums.txt       # 100+ enums from agent.v1/aiserver.v1
+│   ├── dashboard-service-rpcs.txt   # 200+ DashboardService RPCs
+│   ├── protobuf-agent-v1-types.txt  # 599 agent.v1 types
+│   ├── protobuf-dashboard-billing-classes.txt
+│   └── protobuf-enums-and-schemas.txt
+├── runtime/
+│   ├── network-topology.txt         # IP addresses, DNS, connection map
+│   ├── docker-in-docker-inspection.json
+│   ├── cursorvm-manager-domains.txt # 20 cluster URLs
+│   ├── pod-daemon-config-strings.txt
+│   ├── pod-daemon-service.txt
+│   └── bundled-fonts-list.txt
+├── security/
+│   ├── credential-flow-analysis.txt # 3 token types, access token architecture
+│   └── cursorsandbox-help.txt
+└── ecr/
+    ├── ecr-tags.json                # 1000 ECR tags (3 image variants)
+    ├── ecr-default-config.json
+    ├── ecr-browser-use-config.json
+    └── ecr-computer-use-config.json
 ```
 
 ---
