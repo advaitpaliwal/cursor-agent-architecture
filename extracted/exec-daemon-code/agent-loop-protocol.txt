@@ -1,0 +1,191 @@
+# Agent Loop Protocol - Complete Request/Response Cycle
+# How the Cursor agent processes user messages end-to-end
+
+## AgentRunRequest (client -> server)
+# Sent from exec-daemon to aiserver for each agent interaction
+
+Fields:
+  conversation_state (1): ConversationStateStructure
+  action (2): ConversationAction
+  model_details (3): ModelDetails (deprecated, use requested_model)
+  requested_model (9): RequestedModel (optional)
+  mcp_tools (4): McpTools
+  conversation_id (5): optional string
+  mcp_file_system_options (6): optional McpFileSystemOptions
+  skill_options (7): optional SkillOptions (deprecated, moved to RequestContext)
+  custom_system_prompt (8): optional string  # ALLOWLISTED FOR SPECIFIC TEAMS ONLY
+  suggest_next_prompt (10): optional bool (default true)
+  subagent_type_name (11): optional string  # e.g., "coordinator-agent", "explore"
+  exclude_workspace_context (12): optional bool  # Strip rules, skills, transcripts, notes
+
+## ConversationAction (11 action types)
+# The oneof that describes what triggered this agent run
+
+  user_message_action (1): UserMessageAction       # New user message
+  resume_action (2): ResumeAction                   # Resume from previous state
+  cancel_action (3): CancelAction                   # Cancel current operation
+  summarize_action (4): SummarizeAction             # Explicit summary request
+  shell_command_action (5): ShellCommandAction       # Shell command result
+  start_plan_action (6): StartPlanAction             # Enter plan mode
+  execute_plan_action (7): ExecutePlanAction          # Execute approved plan
+  async_ask_question_completion_action (8): AsyncAskQuestionCompletionAction
+  cancel_subagent_action (10): CancelSubagentAction  # Cancel a subagent
+  background_task_completion_action (12): BackgroundTaskCompletionAction
+  background_shell_action (13): BackgroundShellAction
+  triggering_auth_id (11): optional string           # User ID for co-author attribution
+
+## ConversationState
+# Full conversation state persisted across turns
+
+  root_prompt_messages_json (1): repeated string    # System prompt messages as JSON
+  turns (8): repeated ConversationTurn              # All conversation turns
+  todos (3): repeated TodoItem                      # Task tracking items
+  pending_tool_calls (4): repeated string           # Raw JSON tool calls awaiting execution
+  token_details (5): ConversationTokenDetails       # Token usage tracking
+  summary (6): optional ConversationSummary         # User-requested summary
+  plan (7): optional ConversationPlan               # Active plan
+  summary_archive (9): optional ConversationSummaryArchive  # Deprecated
+  file_states (10): map<string, FileState>          # Tracked file states
+  summary_archives (11): repeated ConversationSummaryArchive
+
+## ConversationStateStructure (wrapper)
+  conversation_state (1): ConversationState
+  subagent_states (2): map<string, SubagentPersistedState>  # Agent ID -> state
+
+## InteractionUpdate (server -> client streaming)
+# 19 update types streamed from server during processing
+
+  text_delta (1): TextDeltaUpdate                   # Model text output chunk
+  partial_tool_call (7): PartialToolCallUpdate      # Partial tool call (streaming)
+  tool_call_delta (15): ToolCallDeltaUpdate          # Tool call streaming delta
+  tool_call_started (2): ToolCallStartedUpdate       # Tool call begins
+  tool_call_completed (3): ToolCallCompletedUpdate   # Tool call finished
+  thinking_delta (4): ThinkingDeltaUpdate            # Thinking/reasoning chunk
+  thinking_completed (5): ThinkingCompletedUpdate    # Thinking block complete
+  user_message_appended (6): UserMessageAppendedUpdate  # User message added
+  token_delta (8): TokenDeltaUpdate                  # Token count update
+  summary (9): SummaryUpdate                         # Summary content
+  summary_started (10): SummaryStartedUpdate
+  summary_completed (11): SummaryCompletedUpdate
+  shell_output_delta (12): ShellOutputDeltaUpdate    # Shell command output
+  heartbeat (13): HeartbeatUpdate                    # Keep-alive
+  turn_ended (14): TurnEndedUpdate                   # Agent turn complete
+  step_started (16): StepStartedUpdate               # Agentic step begins
+  step_completed (17): StepCompletedUpdate           # Agentic step ends
+  prompt_suggestion (18): PromptSuggestionUpdate     # Suggested follow-up
+  post_request_prompt (19): PostRequestPromptUpdate  # Post-interaction prompt (title, message, button)
+
+## PostRequestPromptUpdate
+# UI prompt shown after interaction completes
+  title (1): string
+  message (2): string
+  button_label (3): string
+  button_url (4): string
+
+## ModelDetails
+  modelId (1): string               # e.g., "gpt-5"
+  displayModelId (2): string
+  displayName (3): string            # e.g., "GPT-5"
+  displayNameShort (4): string
+  aliases (5): repeated string
+  credentials: oneof {
+    api_key_credentials: ApiKeyCredentials
+    azure_credentials: AzureCredentials
+    bedrock_credentials: BedrockCredentials
+  }
+
+## DEFAULT_CONFIG (hardcoded defaults)
+  version: 1
+  editor: { vimMode: false }
+  display: {
+    showLineNumbers: true
+    showThinkingBlocks: false
+    showStatusIndicators: false
+  }
+  permissions: {
+    allow: ["Shell(ls)"]
+    deny: []
+  }
+  hasChangedDefaultModel: false
+  model: GPT-5 (modelId: "gpt-5")
+  network: { useHttp1ForAgent: false }
+  approvalMode: "allowlist"
+  sandbox: { mode: "disabled", networkAccess: "user_config_with_defaults" }
+  attribution: {
+    attributeCommitsToAgent: true
+    attributePRsToAgent: true
+  }
+
+  MCP permission syntax:
+    "Mcp(*:*)"                    - all tools from all servers
+    "Mcp(server-name:*)"          - all tools from specific server
+    "Mcp(*:tool-name)"            - specific tool from any server
+    "Mcp(server-name:tool-name)"  - specific tool from specific server
+
+## Agent Data Cleanup
+  DEFAULT_AGENT_DATA_TTL_MS: 30 days
+  DEFAULT_AGENT_DATA_CLEANUP_INTERVAL_MS: 24 hours
+  Allowed extensions: .txt, .json, .jsonl
+  Subdirectories: agent-transcripts, agent-tools
+
+## AgentMode Enum (7 modes)
+  UNSPECIFIED = 0
+  AGENT = 1           # Standard agent mode (tool use, code changes)
+  ASK = 2             # Ask mode (no tool use, just answers)
+  PLAN = 3            # Plan mode (architecture planning)
+  DEBUG = 4           # Debug mode
+  TRIAGE = 5          # Triage mode (issue classification)
+  PROJECT = 6         # Project mode (multi-step project management)
+
+## ThinkingStyle Enum (per-model rendering)
+  UNSPECIFIED = 0
+  DEFAULT = 1         # Collapsible "Thinking" / "Thought Xs" blocks
+  CODEX = 2           # Codex-class: render thinking more prominently with headers
+  GPT5 = 3            # GPT-5 style: **Thinking headers** that can speak mid-turn
+
+## PrivacyMode Enum (5 levels)
+  UNSPECIFIED = 0
+  NO_STORAGE = 1                      # Don't store conversations
+  NO_TRAINING = 2                     # Don't use for training
+  USAGE_DATA_TRAINING_ALLOWED = 3     # Usage data OK for training
+  USAGE_CODEBASE_TRAINING_ALLOWED = 4 # Codebase OK for training
+
+## CommandClassifierResult.SuggestedSandboxMode
+  UNSPECIFIED = 0
+  SANDBOX = 1         # Safe to run in sandbox
+  NO_SANDBOX = 2      # Needs full access (writes outside workspace)
+  UNDETERMINED = 3    # Cannot determine (e.g., script execution)
+
+## Key Architecture Insights
+
+### 1. Custom System Prompt Override
+  Field custom_system_prompt (8) on AgentRunRequest allows teams to inject
+  a custom system prompt. This is ALLOWLISTED - only specific teams can use it.
+
+### 2. Subagent Type Names
+  The subagent_type_name field enables different agent "personalities":
+  - "coordinator-agent": Orchestration subagent
+  - "explore": Read-only code exploration
+  - Custom types looked up in SubagentTypeConfig on the backend
+
+### 3. Workspace Context Stripping
+  exclude_workspace_context (12) strips ALL workspace-sourced context:
+  rules (workspace + user + team), skills, transcripts, notes,
+  terminal files, and past conversation explorer.
+  Preserves: system prompt, tools, and codebase.
+
+### 4. Post-Request Prompts
+  The server can push UI prompts (with clickable buttons) after processing.
+  Used for upgrade prompts, feature announcements, etc.
+
+### 5. ThinkingStyle
+  Model thinking/reasoning is a first-class concept with dedicated
+  delta and completed update types.
+
+### 6. Prompt Suggestions
+  Server generates follow-up prompt suggestions (suggest_next_prompt).
+  Can be disabled per-request to save resources.
+
+### 7. File State Tracking
+  ConversationState.file_states maps filename to FileState,
+  tracking which files the agent has modified across the conversation.
