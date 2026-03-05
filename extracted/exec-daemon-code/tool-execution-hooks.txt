@@ -1,0 +1,220 @@
+# Tool Execution Hooks & Agent Loop Control
+# Pre/Post tool hooks, continuation loop config, and transcript system
+# Source: exec-daemon webpack bundle
+
+## Tool Execution Pipeline
+
+### Lifecycle: Tool Call Request -> PreToolUse -> Execute -> PostToolUse -> Result
+
+1. Server sends ClientSideToolV2Call with tool type + arguments
+2. exec-daemon runs PreToolUseRequestQuery hook (if configured)
+3. Hook can: allow, deny, ask, or modify inputs
+4. Tool executes
+5. exec-daemon runs PostToolUseRequestQuery hook (if configured)
+6. Hook can inject additional context
+7. Result sent back to server as tool result
+
+## PreToolUseRequestQuery (agent.v1)
+
+Sent BEFORE a tool executes. Enables external systems to:
+- Approve/deny tool execution
+- Modify tool input parameters
+- Display custom messages to users
+
+### Fields
+  tool_name (1): string                    # e.g., "Task", "Shell", "Read"
+  tool_input (2): google.protobuf.Struct   # Tool parameters as JSON
+  tool_use_id (3): string                  # Unique call ID
+  cwd (4): optional string                 # Working directory
+  conversation_id (5): optional string     # Stable across turns
+  generation_id (6): optional string       # Current request ID
+  model (7): optional string               # Model ID being used
+
+## PreToolUseRequestResponse (agent.v1)
+
+Returned from hook to control tool execution.
+
+### Fields
+  permission (1): optional string          # "allow", "deny", or "ask"
+  user_message (2): optional string        # Message for the user (e.g., denial reason)
+  agent_message (3): optional string       # Message injected into agent context
+  updated_input (4): optional string       # JSON of MODIFIED tool parameters
+
+### Key Capability: Input Modification
+  The updated_input field allows hooks to MODIFY tool parameters before execution.
+  This enables:
+  - Path rewriting (e.g., redirect file writes)
+  - Argument sanitization
+  - Parameter injection
+
+## PostToolUseRequestQuery (agent.v1)
+
+Sent AFTER a tool executes successfully.
+
+### Fields
+  tool_name (1): string                    # Tool that was invoked
+  tool_input (2): google.protobuf.Struct   # Original input parameters
+  tool_output (3): string                  # Tool result as JSON string
+  duration_ms (4): int64                   # Execution time in milliseconds
+  tool_use_id (5): string                  # Matches PreToolUse ID
+  cwd (6): optional string                 # Working directory
+  conversation_id (7): optional string     # Stable across turns
+  generation_id (8): optional string       # Current request ID
+  model (9): optional string               # Model ID being used
+
+## PostToolUseRequestResponse (agent.v1)
+
+### Fields
+  additional_context (1): optional string  # Context injected after tool execution
+
+### Use Case
+  Post-hooks can inject additional information into the conversation
+  after tool execution. For example:
+  - "File saved. Note: this file requires compilation."
+  - Lint error summaries after file edits
+  - Test result analysis after test runs
+
+## Client-Side Continuation Loop (ClientContinuationConfig)
+
+The agent loop runs on the CLIENT (exec-daemon), not the server.
+The server provides configuration for how the client should manage the loop.
+
+### Fields
+  idle_threshold (1): int32                # Consecutive idle iterations before escape
+  max_loops (2): int32                     # Hard cap (0 = unlimited)
+  nudge_message (3): string               # Sent when model is idle
+  escape_message_template (4): string      # Template: {idle_count}, {escape_token}
+  collect_background_children (5): bool    # Collect child results after loop
+  children_completed_message_template (6): string  # Template: {summaries}
+
+### Loop Algorithm
+  1. Server sends a single execute() call
+  2. Client enters continuation loop
+  3. Each iteration:
+     a. Send conversation state to server
+     b. Server returns text + tool calls
+     c. Client executes tool calls locally
+     d. If zero tool calls: increment idle counter
+     e. If idle_count > 0 but < idle_threshold: send nudge_message
+     f. If idle_count >= idle_threshold: send escape_message_template
+     g. If model echoes escape_token: loop exits
+     h. If total iterations >= max_loops: loop exits
+  4. After loop: if collect_background_children, wait for child subagents
+  5. Send children_completed_message_template with {summaries}
+
+### Escape Hatch Mechanism
+  The escape_message_template contains a random {escape_token}.
+  If the model produces this token, it signals intentional completion.
+  This prevents the model from looping indefinitely.
+
+## Transcript System
+
+### HistoryVisibilityMode
+  INTERNAL: Include system prompt + first user context + all conversation
+  EXTERNAL: Skip system prompt and first user context message
+
+### ConversationMessage Types
+  HUMAN  -> role: "user" (except first message in INTERNAL mode -> "system")
+  AI     -> role: "assistant"
+  Other  -> role: "unknown"
+
+### Transcript Format (TraceMessage)
+  { role: "user"|"assistant"|"system"|"tool"|"unknown" }
+  + text: string (message content)
+  + thinking: string (reasoning/thinking content)
+  + tool_calls: [{ tool_call_id, tool_name, tool_args }]
+  + tool_result: any (for role="tool" messages)
+
+### TranscriptLoader
+  Provides unified interface for loading conversation transcripts:
+  - listRecentConversations(limit=100) -> metadata sorted by lastUpdatedAt
+  - getTranscript(conversationId) -> { transcript, transcriptJson, messages, mode }
+  - batchSerializeForWire(transcripts) -> network-ready format
+
+### Conversation Hydration (hydrateMessages)
+  Reconstructs full conversation from blob store:
+  1. Hydrate archived messages from summary_archive.summarized_messages
+  2. Hydrate current prompt tail from root_prompt_messages_json
+  3. Filter out system messages and summary messages from tail
+  4. Concatenate archived + filtered tail
+
+  Messages are stored as blobs (binary) and hydrated on demand.
+  Summary archives allow long conversations to be compressed.
+
+### Content Part Types
+  text -> Plain text (optionally with XML tags stripped)
+  image -> [Image]
+  file -> [File: filename]
+  reasoning -> [Thinking] text
+  redacted-reasoning -> [Thinking]
+  tool-call -> [Tool call] toolName + formatted args
+  tool-result -> [Tool result] toolName
+
+## ForceBackgroundShell
+
+### ForceBackgroundShellArgs
+  tool_call_id (1): string
+
+### ForceBackgroundShellStatus
+  UNSPECIFIED = 0
+  SUCCESS = 1
+  FAILURE = 2
+
+### Purpose
+  Forces a running shell command into background execution.
+  The agent can continue processing while the command runs.
+  The parent agent can later await the result via BackgroundTaskCompletion.
+
+## SubagentStopRequestQuery / SubagentStopRequestResponse
+
+### StopQuery Fields
+  subagent_id (1): string
+  tool_call_id (2): string
+  loop_count (3): int32    # How many iterations the subagent ran
+
+### StopResponse Fields
+  should_stop (1): bool    # Whether to stop the subagent
+  message (2): string      # Message to inject if stopping
+
+### Purpose
+  Allows external systems to stop a subagent mid-execution.
+  The loop_count field enables policies like "stop after N iterations".
+
+## MCP Tool Execution
+
+### ExecutableMcpToolSet
+  - execute(name, args, toolCallId, elicitationFactory)
+  - getTools() -> tool definitions
+  - Throws McpToolNotFoundError if tool doesn't exist
+
+### McpToolNotFoundError
+  Contains: toolName, availableTools[]
+  Message: "Tool {name} not found, available tools: {list}"
+
+## Key Architecture Insights
+
+### 1. Hooks Run OUTSIDE the Model
+  PreToolUse and PostToolUse hooks execute in the client (exec-daemon)
+  or external systems. They are NOT model-driven. This allows:
+  - Security policies (deny dangerous operations)
+  - Audit logging
+  - Tool input sanitization
+  - Custom approval flows
+
+### 2. The Model Field in Hooks
+  Both PreToolUse and PostToolUse include the model ID.
+  This enables model-specific policies (e.g., "only allow GPT-5 to run Shell").
+
+### 3. Continuation Loop is Client-Side
+  The server doesn't maintain the loop. It processes ONE request at a time.
+  The client (exec-daemon) drives the loop, sending repeated requests.
+  This design:
+  - Reduces server-side state
+  - Allows client-side tool execution
+  - Enables background processing
+  - Supports subagent isolation
+
+### 4. Escape Token is Random
+  The escape_token in escape_message_template is randomly generated
+  per loop. This prevents the model from "learning" a fixed escape sequence
+  and using it prematurely.
