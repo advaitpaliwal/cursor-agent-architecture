@@ -1335,8 +1335,6 @@ This confirms polished-renderer lives in the `everysphere` monorepo under `packa
 
 ## Live Sandbox Verification (March 4, 2026)
 
-The following sections were added by running analysis from **inside a live Cursor Cloud sandbox** (via Claude Code running as a companion agent within the same container). This provides ground-truth validation of the architecture and reveals additional details not visible from the image alone.
-
 ### Exec Daemon File Layout (Updated)
 
 The original README documented the exec-daemon directory. Here's the **complete, verified** layout with sizes:
@@ -2128,13 +2126,6 @@ crane manifest public.ecr.aws/k0i0n2g5/cursorenvironments/universal:default-b8e9
 
 ```
 
-### Additional Session Waves
-
-Raw wave-by-wave notes are included in this same README under:
-- [Session Wave Notes (Raw Extracts)](#session-wave-notes-raw-extracts)
-
-The curated architecture narrative continues below.
-
 ## Wave 9-14 Discoveries (Session 2)
 
 ### Connect-RPC API Surface (LIVE TESTED)
@@ -2228,12 +2219,9 @@ all-protobuf-enums.txt            # 100+ enums from agent.v1/aiserver.v1
 
 ## Session Wave Notes (Raw Extracts)
 
-This file contains raw command/evidence notes captured during multiple live inspection waves on March 4, 2026.
-
-These notes are intentionally preserved in near-original form and may contain dense command annotations.
+Raw command/evidence notes captured during live inspection waves on March 4, 2026.
 
 ````bash
-# === Added March 4, 2026 — Wave 1 (from inside live sandbox via Claude Code) ===
 ls -la /exec-daemon/                    # → full file layout with sizes (rg, gh, polished-renderer.node)
 file /exec-daemon/polished-renderer.node  # → ELF shared object (N-API addon)
 file /exec-daemon/rg                    # → static-pie ELF (bundled ripgrep)
@@ -2261,7 +2249,6 @@ strings /exec-daemon/index.js | grep "RERANKER_ALGORITHM"      # → 10 reranker
 strings /exec-daemon/index.js | grep "gemini\|smart.allowlist" # → Gemini command classifier
 strings /exec-daemon/index.js | grep "InvocationContext"       # → IDE state, GitHub PR, Slack thread triggers
 
-# === Added March 4, 2026 — Wave 3 (container runtime, host details, Ansible) ===
 curl -s http://localhost:2375/containers/pod-kyaoya54prfyzkhl4qagqnuf34-b8e29869/json  # → Full container inspect
 cat /sys/fs/cgroup/memory/memory.limit_in_bytes  # → 17179869184 (16 GB)
 cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us           # → 400000 (4 cores)
@@ -2281,7 +2268,6 @@ strings /exec-daemon/index.js | grep "cursorvm-manager"  # → 17 cluster URLs (
 strings /exec-daemon/index.js | grep "anysphere"         # → @anysphere/* internal packages
 python3 -c "gRPC HTTP/2 probe on port 50052"     # → SETTINGS frame (confirms gRPC)
 
-# === Added March 4, 2026 — Wave 2 (cursorsandbox deep dive, security, infrastructure) ===
 strings /exec-daemon/cursorsandbox | grep -i "sandbox:"        # → 7-step sandbox init process
 strings /exec-daemon/cursorsandbox | grep -i "landlock"        # → Landlock LSM integration
 strings /exec-daemon/cursorsandbox | grep -i "seccomp"         # → BPF filter for syscall blocking
@@ -2299,8 +2285,6 @@ cat /proc/self/status | grep Seccomp                           # → Seccomp: 0 
 curl -s 169.254.169.254 --connect-timeout 2                   # → Connection timeout (metadata blocked)
 ss -tlnp                                                       # → Ports 26500/50052 on 0.0.0.0
 curl -s https://public-asphr-vm-daemon-bucket.s3.us-east-1.amazonaws.com/ # → AccessDenied (listing blocked)
-
-# === Added March 4, 2026 — Wave 5 (ECR enumeration, complete protobuf, billing, image config) ===
 
 ## ECR Public Registry — FULLY ENUMERABLE
 # Tag listing is public despite directory listing being denied
@@ -2591,8 +2575,6 @@ curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cu
 # are the user's Anthropic auth, ghs_* is their GitHub installation token.
 # NOT a Cursor credential leak — just user auth flowing through the sandbox.
 
-# === Added March 4, 2026 — Wave 6 (ECR deep dive, image variants, Docker host) ===
-
 ## Three Distinct Image Variants (from ECR layer analysis)
 
 ### 1. default-* (Our current image, 2.18GB compressed, 23 layers, 44 build steps)
@@ -2678,8 +2660,6 @@ curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cu
 # Tag format: {variant}-{7char-sha} matching everysphere monorepo commits
 # All layers downloadable: manifests, configs, tar.gz layers all accessible
 # Can reconstruct any image variant by downloading all layers
-
-# === Added March 4, 2026 — Wave 7 (S3 artifact bucket, exec-daemon tarball, orchestration) ===
 
 ## S3 Artifact Bucket: public-asphr-vm-daemon-bucket
 
@@ -2778,8 +2758,6 @@ curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cu
 # - Both share the same Ansible playbook and build context
 # - polished-renderer lives in ansible/files/ for both public and internal builds
 # - polished-renderer Cargo.toml uses workspace references, auto-converted for standalone build
-
-# === Added March 4, 2026 — Wave 8 (live policy, privilege, and network verification) ===
 
 ## Privilege Model (Live)
 # User `ubuntu` has no effective Linux capabilities (`CapEff=0`) but has passwordless sudo:
