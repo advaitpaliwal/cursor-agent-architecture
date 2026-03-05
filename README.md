@@ -1,7 +1,6 @@
 # Cursor Background Agent — Full Architecture Reference
 
 Reverse-engineered from inside a live Cursor Background Agent sandbox (March 2026).
-Raw evidence files are available in this repository root.
 
 ---
 
