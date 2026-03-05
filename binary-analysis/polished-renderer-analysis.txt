@@ -24,10 +24,10 @@
 
 ## Source Code
 Full Rust source available at /opt/cursor/ansible/files/polished-renderer/
-(extracted to extracted/polished-renderer/ - 7,171 lines, 33 files)
+(mirrored in this repository at polished-renderer/polished-renderer/ - 7,171 lines, 33 files)
 
 ## Rendering Pipeline
-See extracted/polished-renderer/src/ for full implementation:
+See polished-renderer/polished-renderer/src/ for full implementation:
 - Frame capture from VNC/X11
 - Video encoding (likely via ffmpeg/libx264)
 - Motion planning and cursor animation
