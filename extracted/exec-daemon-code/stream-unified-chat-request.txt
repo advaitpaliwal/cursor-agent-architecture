@@ -1,0 +1,200 @@
+# StreamUnifiedChatRequest - Complete Field Documentation
+# The main LLM chat request message sent from exec-daemon to aiserver
+# Source: aiserver.v1.StreamUnifiedChatRequest (exec-daemon webpack bundle)
+# Total: 63 fields (field numbers 1-93, with gaps from deprecated/removed fields)
+
+## Field Catalog (field_no -> name -> type -> notes)
+
+### Core Conversation
+  1.  conversation                        -> repeated ConversationMessage      # May be truncated
+  30. full_conversation_headers_only       -> repeated ConversationMessageHeader # Always sent even if conversation truncated
+  23. conversation_id                      -> string                           # Empty = new chat
+  72. replying_to_request_id               -> string                           # Links to previous request
+  28. conversation_summary                 -> optional ConversationSummary     # Compressed history
+
+### Model & Inference
+  5.  model_details                        -> ModelDetails                     # Model ID, display name, credentials
+  49. thinking_level                        -> ThinkingLevel enum              # MEDIUM=1, HIGH=2
+  37. allow_model_fallbacks                 -> optional bool                   # Allow server to use fallback model
+  38. number_of_times_shown_fallback_model_warning -> optional int32           # Track fallback warnings
+  73. should_speculatively_route_gpt5       -> optional bool [DEPRECATED]     # Was used for GPT-5 effort routing experiment
+
+### Mode & Configuration
+  46. unified_mode                          -> UnifiedMode enum                # CHAT=1, AGENT=2, EDIT=3, CUSTOM=4, PLAN=5, DEBUG=6
+  54. unified_mode_name                     -> optional string                 # Custom mode name
+  22. is_chat                               -> bool [DEPRECATED]              # Old chat vs composer distinction
+  27. is_agentic                            -> bool [DEPRECATED]              # Old agentic mode flag
+  45. is_headless                           -> bool                           # Headless/background execution
+  68. is_background_composer                 -> bool                           # Background agent session
+  77. is_spec_mode                          -> optional bool                  # Spec mode enabled
+
+### Tools
+  29. supported_tools                       -> repeated ClientSideToolV2 enum  # All tools this client supports
+  47. tools_requiring_accepted_return       -> repeated ClientSideToolV2 enum  # Tools needing user acceptance
+  48. should_disable_tools                  -> optional bool                   # Disable all tool use
+  57. edit_tool_supports_search_and_replace -> optional bool                   # Edit tool capabilities
+  34. mcp_tools                             -> repeated MCPParams.Tool         # Available MCP tools
+  90. has_mcp_descriptors                   -> optional bool                   # MCP descriptors present
+
+### Context & Files
+  3.  explicit_context                      -> ExplicitContext                 # User-attached context
+  10. project_context                       -> optional ConversationMessage    # Project-level context
+  15. current_file                          -> CurrentFileInfo                 # Currently open file
+  16. recent_edits                          -> optional RecentEdits            # Recent editor changes
+  18. file_diff_histories                   -> repeated ComposerFileDiffHistory # File change history
+  21. quotes                                -> repeated ChatQuote              # Quoted code/text
+  20. additional_ranked_context             -> repeated RankedContext           # Ranked additional context
+  81. workspace_folders                     -> repeated WorkspaceFolder         # Workspace folder URIs
+
+### Codebase & Indexing
+  42. uses_codebase_results                 -> optional CodeSearchResult       # Semantic search results
+  59. repository_name_if_unindexed          -> optional string                # Repo name when not indexed
+  60. indexing_progress                      -> optional double                # 0.0-1.0 indexing progress
+  62. indexing_phase_if_unindexed           -> optional string                # Current indexing phase
+  64. indexing_num_files_if_unindexed       -> optional int32                 # Files being indexed
+  78. allow_server_side_semantic_search     -> bool                           # Allow server-side search
+
+### Repository Integration
+  24. repository_info                       -> RepositoryInfo                  # Git repo metadata
+  25. repository_info_should_query_staging  -> bool                           # Query staging environment
+  39. repository_info_should_query_prod     -> bool                           # Query prod environment
+  52. query_only_repo_access                -> QueryOnlyRepoAccess            # Read-only repo access
+  44. repo_query_auth_token                 -> string                         # Auth for repo queries
+
+### Permissions & Sandbox
+  31. enable_yolo_mode                      -> bool                           # Auto-approve all commands
+  32. yolo_prompt                           -> string                         # Custom YOLO mode prompt
+  83. sandboxing_support_enabled            -> optional bool                  # Client has sandbox support
+
+### Context Bank (Encrypted Conversation Cache)
+  40. context_bank_session_id               -> optional string                # Session ID for context cache
+  41. context_bank_version                  -> optional int32                 # Cache version
+  43. context_bank_encryption_key           -> optional bytes                 # User-provided encryption key
+
+### Caching & Compression
+  2.  allow_long_file_scan                  -> optional bool                  # Allow scanning large files
+  4.  can_handle_filenames_after_language_ids -> optional bool                # Client capability flag
+  13. should_cache                           -> optional bool                 # Enable response caching
+  19. use_new_compression_scheme             -> optional bool                 # New conversation compression
+  35. use_full_inputs_context                -> optional bool                 # Send full input context
+
+### Rules & Prompts
+  51. uses_rules                             -> optional bool                 # Cursor rules enabled
+  56. use_generate_rules_prompt              -> optional bool                 # Generate rules prompt
+  84. custom_planning_instructions           -> optional string               # User's plan mode instructions
+
+### Linting
+  6.  linter_errors                          -> LinterErrors                  # Current file lint errors
+  14. multi_file_linter_errors               -> repeated LinterErrors         # Multi-file lint errors
+  71. should_attach_linter_errors            -> optional bool                 # Attach lints even with LintsV2
+
+### Terminal & Files Persistence
+  85. enable_terminal_file_persistence       -> optional bool                 # Persist terminal files
+  86. terminals_folder                       -> optional string               # Terminal files directory
+  93. agent_transcripts_folder               -> optional string               # Agent transcripts directory
+  87. agent_notes_folder                     -> optional string [DEPRECATED]  # Old agent notes
+  88. agent_tools_folder                     -> optional string [DEPRECATED]  # Old agent tools
+
+### Image & Readfile Support
+  82. does_readfile_support_images            -> optional bool                # Client can read images
+
+### Planning
+  89. current_plan                            -> optional CurrentPlan         # Active execution plan
+
+### Best-of-N (A/B Testing)
+  91. best_of_n_group_id                      -> optional string              # Group ID for BoN trial
+  92. try_use_best_of_n_promotion             -> optional bool                # Opt into BoN free trial
+
+### Summarization
+  75. force_summarization                     -> optional bool                # Force conversation summary
+  79. speculative_summarization_encryption_key -> optional bytes              # Encryption for cached summaries
+
+### Background
+  55. background_composer_id                  -> optional string              # Background session ID
+  36. is_resume                               -> optional bool                # Resuming previous session
+
+### Other
+  26. environment_info                        -> EnvironmentInfo              # OS, shell, editor details
+  66. subagent_info                           -> optional SubagentInfo        # Subagent metadata
+  67. supports_git_index                      -> bool                         # Git index support
+  69. force_is_not_dev                        -> bool                         # Force non-dev mode
+  70. disable_edit_file_timeout               -> optional bool                # Disable edit timeout (review mode)
+  61. full_file_cmd_k_options                 -> optional FullFileCmdKOptions # Cmd+K full file options
+  63. use_knowledge_base_prompt               -> optional bool                # Knowledge base prompt
+
+### DEPRECATED Fields
+  7.  documentation_identifiers              -> repeated string [DEPRECATED]
+  8.  use_web                                -> optional string [DEPRECATED]
+  9.  external_links                         -> repeated ComposerExternalLink [DEPRECATED]
+  11. diffs_for_compressing_files             -> repeated RedDiff [DEPRECATED]
+  12. compress_edits                          -> optional bool [DEPRECATED]
+  17. use_reference_composer_diff_prompt      -> optional bool
+  33. use_unified_chat_prompt                 -> bool [DEPRECATED]
+  50. should_use_chat_prompt                  -> optional bool [DEPRECATED]
+  58. project_layouts                         -> repeated ProjectLayout [DEPRECATED]
+  74. force_terminal_hanging_detection        -> optional bool [DEPRECATED]    # Was for headless terminal training
+  76. is_quick_search_query                   -> optional bool [DEPRECATED]    # Quick search removed
+
+## Sub-Message: UnifiedMode Enum
+  UNSPECIFIED = 0
+  CHAT        = 1   # Chat mode (no tool use, conversational)
+  AGENT       = 2   # Agent mode (full tool use, code changes)
+  EDIT        = 3   # Edit mode (focused editing, Cmd+K)
+  CUSTOM      = 4   # Custom mode (user-defined)
+  PLAN        = 5   # Plan mode (architecture planning)
+  DEBUG       = 6   # Debug mode
+
+## Sub-Message: ThinkingLevel Enum
+  UNSPECIFIED = 0
+  MEDIUM      = 1   # Medium thinking effort
+  HIGH        = 2   # High thinking effort (extended reasoning)
+
+## Key Architecture Insights
+
+### 1. Model Routing is Server-Side
+  The DEFAULT_CONFIG has "gpt-5" as a client-side fallback only.
+  The actual model is determined by:
+  - model_details (field 5): ModelDetails with modelId, displayName, credentials
+  - Agent-level: AgentRunRequest.requested_model (RequestedModel with model_id, max_mode, parameters)
+  - Server resolves the model ID to a specific version/endpoint
+  - The deprecated should_speculatively_route_gpt5 confirms GPT-5 routing experiments existed
+
+### 2. Model Fallback System
+  allow_model_fallbacks (field 37) enables the server to use a different model
+  if the requested model is unavailable. number_of_times_shown_fallback_model_warning
+  tracks how many times the user has been warned about fallbacks.
+
+### 3. RequestedModel Has Version Variants
+  RequestedModel.is_variant_string_representation (field 8) indicates the model_id
+  comes from a ModelVariantConfig. This means "gpt-5" might map to different variants
+  (like gpt-5.3) based on server-side configuration. The client sends "gpt-5" but
+  the server can resolve it to any variant in the model family.
+
+### 4. Context Bank = Encrypted Conversation Cache
+  Three fields (session_id, version, encryption_key) implement encrypted
+  conversation state caching in Redis. The encryption key is USER-PROVIDED,
+  meaning the server cannot read cached conversations without the client's key.
+  This is a privacy-by-design feature for long conversations.
+
+### 5. Speculative Summarization
+  speculative_summarization_encryption_key (field 79) enables encrypted
+  summarization caching. Combined with force_summarization (field 75),
+  this allows proactive conversation compression with E2E encryption.
+
+### 6. Best-of-N Trials
+  best_of_n_group_id + try_use_best_of_n_promotion implement A/B testing
+  where multiple model responses are generated and the best is selected.
+  FreeBestOfNPromotion tracks trials_used and trials_remaining.
+
+### 7. YOLO Mode
+  enable_yolo_mode + yolo_prompt enable auto-approval of ALL commands.
+  The yolo_prompt field allows users to customize YOLO mode behavior
+  (e.g., "auto-approve all git commands").
+
+### 8. Spec Mode
+  is_spec_mode (field 77) enables "specification mode" - a dedicated mode
+  for writing and executing specifications/requirements.
+
+### 9. Review Mode Connection
+  disable_edit_file_timeout (field 70) is set "when review mode is active",
+  indicating a PR review mode that disables edit timeout restrictions.

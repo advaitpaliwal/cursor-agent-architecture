@@ -1,0 +1,188 @@
+# Sandbox Policy & Security Deep Dive
+# Detailed analysis of sandbox, network policy, secret redaction, and command classification
+# Source: exec-daemon webpack bundle + live sandbox analysis
+
+## SandboxPolicy (agent.v1.SandboxPolicy)
+
+### Policy Types (SandboxPolicy.Type)
+  UNSPECIFIED        = 0
+  INSECURE_NONE      = 1   # No sandbox restrictions at all
+  WORKSPACE_READWRITE = 2  # Can read/write workspace, restricted elsewhere
+  WORKSPACE_READONLY  = 3  # Read-only workspace access
+
+### Policy Fields
+  type (1): SandboxPolicy.Type              # Base policy type
+  network_access (2): optional bool          # Whether network is allowed
+  additional_readwrite_paths (3): repeated string  # Extra writable paths
+  additional_readonly_paths (4): repeated string   # Extra readable paths
+  debug_output_dir (5): optional string      # Debug output directory
+  disable_tmp_write (7): optional bool       # Block /tmp writes (testing)
+  allowlist_escalated (8): optional bool     # Policy was auto-escalated from allowlist match
+  enable_shared_build_cache (9): optional bool # Share build caches (npm, cargo, pip)
+  network_policy (10): optional NetworkPolicy # Fine-grained network rules
+  network_policy_strict (11): optional bool  # Fail-closed on invalid policy (default true)
+  capture_denies (12): optional bool         # Log sandbox deny events
+  skip_statsig_defaults (13): optional bool  # Don't merge Statsig default allowlist
+
+### Policy Merge Sources (SandboxPolicyMergeSources)
+  Three layers merged in priority order:
+  per_user (1): SandboxPolicy    # User preferences (lowest priority)
+  per_repo (2): SandboxPolicy    # Repository .cursor/settings
+  team_admin (3): SandboxPolicy  # Enterprise admin controls (highest priority)
+
+## NetworkPolicy (agent.v1.NetworkPolicy)
+
+### Fields
+  allow (1): repeated string                      # Allowed domains/patterns
+  default_action (2): NetworkPolicy.DefaultAction  # Default for unlisted domains
+  deny (3): repeated string                        # Blocked domains/patterns
+  allow_port_ranges (4): repeated string           # Allowed port ranges
+  logging (5): NetworkPolicyLoggingConfig           # Deny event logging config
+
+### DefaultAction Enum
+  UNSPECIFIED = 0
+  ALLOW       = 1   # Allow unlisted domains
+  DENY        = 2   # Block unlisted domains
+
+### NetworkPolicyLoggingConfig
+  enable_deny_logging (1): bool          # Log blocked network requests
+  max_deny_events_per_run (2): int32     # Cap on logged events
+
+## Smart Allowlist (Command Classification)
+
+### Overview
+  Uses Gemini 2.0 Flash to parse shell commands and extract individual commands.
+  Enables intelligent auto-approval based on user's allowlist/denylist.
+
+### CommandClassifierResult (agent.v1.CommandClassifierResult)
+  commands (1): repeated ClassifiedCommand   # Parsed commands
+  suggested_sandbox_mode (2): SuggestedSandboxMode  # Classifier's sandbox recommendation
+
+### ClassifiedCommand
+  name (1): string             # Binary name (e.g., "git", "rm", "python")
+  arguments (2): repeated string  # Command arguments
+
+### SuggestedSandboxMode
+  UNSPECIFIED  = 0   # Default/unknown -> will prompt user
+  SANDBOX      = 1   # Safe to run sandboxed
+  NO_SANDBOX   = 2   # Needs full access (writes outside workspace)
+  UNDETERMINED = 3   # Classifier can't determine -> will prompt user
+
+### Smart Allowlist Flow
+  1. User runs a shell command via the agent
+  2. Gemini classifier parses the command into ClassifiedCommands
+  3. Each command is checked against user's allowlist using PREFIX MATCHING:
+     - Allowlist "git" matches "git status", "git push", etc.
+     - Allowlist "git status" matches "git status --short"
+     - But "npm -y install" does NOT match "npm install" (different arg order)
+  4. Commands also checked against soft denylist (prompts, doesn't block)
+  5. Hard denylist (perms.deny) blocks immediately via separate flow
+  6. Auto-approve only if: all in allowlist, none in soft denylist, not UNDETERMINED
+  7. If not auto-approved: user gets a prompt with reasons
+
+### Key Limitation (documented in code)
+  "Commands are matched as 'name args...' strings against allowlist
+  entries using prefix matching. This means:
+  - 'npm -y install' would NOT match 'npm install' (different argument order)
+  Future improvement: Consider semantic matching or normalizing argument order."
+
+## Secret Redaction System
+
+### Architecture
+  Package: secrets-exec (internal Cursor package)
+  Entry: ../secrets-exec/dist/secret-redactor.js
+  Min secret length: 8 characters
+
+### SecretRedactor Class
+  - Takes secret names + accessor function
+  - Deduplicates and sorts secrets by length (longest first)
+  - Replaces secret values with "[REDACTED]" in strings/bytes
+  - Handles streaming via carry buffer pattern
+
+### Streaming Redaction
+  redactStreamingChunk(redactor, data, carry):
+    1. Concatenate carry buffer + new data
+    2. Check if trailing chars could be start of a secret
+    3. Emit safe portion, hold back potential prefix
+    4. Return { output, carry }
+
+  flushStreamingCarry(redactor, carry):
+    - Final flush of carry buffer at stream end
+
+### Redacting Executors (per tool type)
+  - grep.js: Redacts ripgrep/search output
+  - mcp.js: Redacts MCP tool responses
+  - read.js: Redacts file read content
+  - read-mcp-resource.js: Redacts MCP resource content
+  - shell-core-redactor.js: Redacts shell command output
+
+### Secret Sources
+  Secrets come from environment variables via the --secret-redaction-enabled flag.
+  The lazySecretReader reads secrets on demand (lazy initialization).
+  Secret names are provided by the orchestrator; values come from env vars.
+
+## Image Generation (NEW - Unreleased Feature)
+
+### generate_image_tool.proto
+  GenerateImageToolCall: Tool call for image generation
+  GenerateImageRequestQuery: Pre-execution confirmation query
+  GenerateImageRequestResponse: Image generation result
+
+  Fields in GenerateImageToolCall:
+  - reference_image_paths (5): repeated string  # Input images for img-to-img
+
+  Fields in result:
+  - image_data (2): string  # Generated image data
+
+### CLI Flag
+  --generate-image-enabled: Enable generate image tool (default: false)
+
+  Assets stored in: ARTIFACTS_DIR/assets/
+
+## ForceBackgroundShell
+
+### ForceBackgroundShellArgs
+  tool_call_id (1): string  # Links to the tool call being forced to background
+
+### ForceBackgroundShellStatus Enum
+  UNSPECIFIED = 0
+  SUCCESS = 1
+  FAILURE = 2
+
+### Purpose
+  Allows the system to force a running shell command to continue in the background,
+  freeing the agent to continue processing while the command runs.
+
+## Container Network Topology (Live Analysis)
+
+### Listening Services
+  0.0.0.0:2375   (Docker Engine API, uid=0)
+  0.0.0.0:50052  (Unknown gRPC service, uid=0)
+  0.0.0.0:26500  (pod-daemon gRPC, uid=0)
+  0.0.0.0:26058  (noVNC proxy, uid=1000)
+  127.0.0.1:5901 (VNC server, uid=1000)
+  [::]:26053     (exec-daemon HTTP/Connect-RPC, uid=1000, IPv6)
+  [::]:26054     (exec-daemon WebSocket/PTY, uid=1000, IPv6)
+  [::]:3000      (Application port, uid=1000, IPv6)
+
+### Active Outbound Connections (from container)
+  -> 160.79.104.10:443    (api2.cursor.sh - 4 connections, Google Trust cert)
+  -> 172.64.155.209:443   (api2.cursor.sh via Cloudflare)
+  -> 34.149.66.137:443    (Datadog logs: *.logs.us5.datadoghq.com)
+  -> 142.251.167.207:443  (Google services)
+  -> 172.253.139.188:5228 (Google Cloud Messaging)
+
+### Inbound Connections (from orchestrator)
+  192.168.24.21 -> container:26500 (pod-daemon gRPC)
+  192.168.24.21 -> container:2375  (Docker Engine API)
+
+### Key Finding: Port 50052
+  Unidentified gRPC service on port 50052, owned by root.
+  Not documented elsewhere. Could be an internal sidecar or monitoring service.
+
+## Statsig Feature Flags
+  Referenced: "Cursor's default network allowlist (from Statsig dynamic config)"
+  The skip_statsig_defaults field indicates Cursor uses Statsig for:
+  - Default network allowlists
+  - Feature flags for sandbox behavior
+  - Dynamic configuration that can change without client updates
