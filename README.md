@@ -2,7 +2,6 @@
 
 Reverse-engineered from inside a live Cursor Background Agent sandbox (March 2026).
 Extracted files are available in [`extracted/`](extracted/).
-This document is the detailed technical archive migrated from the original root `README.md`.
 
 ---
 
