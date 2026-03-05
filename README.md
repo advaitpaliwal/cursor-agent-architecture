@@ -37,8 +37,8 @@ Reverse-engineered from inside a live Cursor Background Agent sandbox (March 202
 - [Security Analysis](#security-analysis-live-sandbox-march-4-2026)
 - [Live Sandbox Verification](#live-sandbox-verification-march-4-2026)
 - [Evidence Sources](#evidence-sources)
-- [Wave 9-14 Discoveries](#wave-9-14-discoveries-session-2)
-- [Session Wave Notes](#session-wave-notes-raw-extracts)
+- [Additional Live Findings](#additional-live-findings)
+- [Raw Command Log](#raw-command-log)
 
 ---
 
@@ -2126,7 +2126,7 @@ crane manifest public.ecr.aws/k0i0n2g5/cursorenvironments/universal:default-b8e9
 
 ```
 
-## Wave 9-14 Discoveries (Session 2)
+## Additional Live Findings
 
 ### Connect-RPC API Surface (LIVE TESTED)
 Three services discovered on exec-daemon, all confirmed working:
@@ -2217,9 +2217,9 @@ all-protobuf-enums.txt            # 100+ enums from agent.v1/aiserver.v1
 
 ---
 
-## Session Wave Notes (Raw Extracts)
+## Raw Command Log
 
-Raw command/evidence notes captured during live inspection waves on March 4, 2026.
+Raw command/evidence notes captured during live inspection on March 4, 2026.
 
 ````bash
 ls -la /exec-daemon/                    # → full file layout with sizes (rg, gh, polished-renderer.node)
@@ -2841,7 +2841,7 @@ curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cu
 # Not present: ip, ss, iptables, nft, docker CLI, grpcurl, xxd
 # Present alternatives used: ifconfig, route, netstat, lsof, curl, python3 socket probes
 
-## Evidence Commands (Wave 8)
+## Evidence Commands
 # grep -E 'Cap(Eff|Prm|Bnd)|Seccomp' /proc/self/status
 # sudo -n grep -E 'Cap(Eff|Prm|Bnd)|Seccomp' /proc/1/status
 # sudo -n grep -R ubuntu /etc/sudoers /etc/sudoers.d
