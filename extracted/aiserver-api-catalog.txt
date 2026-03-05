@@ -1,0 +1,1015 @@
+# Complete Protobuf Type Catalog
+# Extracted from exec-daemon webpack bundle (/exec-daemon/index.js)
+
+## Statistics
+Total aiserver.v1 types: 1290
+Total agent.v1 types: 568
+
+## Feature Categories (aiserver.v1)
+
+### BugBot (53 types)
+  aiserver.v1.BugbotAnalyticsDataPoint
+  aiserver.v1.BugbotLearnedRule
+  aiserver.v1.BugbotLicenseUsage
+  aiserver.v1.BugBotPRAnalytics
+  aiserver.v1.BugBotPRData
+  aiserver.v1.BugbotRule
+  aiserver.v1.BugbotRuleAnalytics
+  aiserver.v1.CreateBugbotTeamRuleRequest
+  aiserver.v1.CreateBugbotTeamRuleResponse
+  aiserver.v1.DeleteBugbotLearnedRuleRequest
+  aiserver.v1.DeleteBugbotLearnedRuleResponse
+  aiserver.v1.DeleteBugbotTeamRuleRequest
+  aiserver.v1.DeleteBugbotTeamRuleResponse
+  aiserver.v1.GetBugbotAnalyticsV2Request
+  aiserver.v1.GetBugbotAnalyticsV2Response
+  aiserver.v1.GetBugbotBackfillStatusRequest
+  aiserver.v1.GetBugbotBackfillStatusResponse
+  aiserver.v1.GetBugbotLearnedRulesRequest
+  aiserver.v1.GetBugbotLearnedRulesResponse
+  aiserver.v1.GetBugBotPRAnalyticsRequest
+  aiserver.v1.GetBugBotPRAnalyticsResponse
+  aiserver.v1.GetBugBotProUserSettingsRequest
+  aiserver.v1.GetBugBotProUserSettingsResponse
+  aiserver.v1.GetBugbotRuleAnalyticsRequest
+  aiserver.v1.GetBugbotRuleAnalyticsResponse
+  aiserver.v1.GetBugbotRuleByIdRequest
+  aiserver.v1.GetBugbotRuleByIdResponse
+  aiserver.v1.GetBugbotSettingsRequest
+  aiserver.v1.GetBugbotSettingsResponse
+  aiserver.v1.GetBugbotTeamRulesRequest
+  aiserver.v1.GetBugbotTeamRulesResponse
+  aiserver.v1.GetBugbotUserSettingsRequest
+  aiserver.v1.GetBugbotUserSettingsResponse
+  aiserver.v1.GetTeamBugbotSettingsRequest
+  aiserver.v1.GetTeamBugbotSettingsResponse
+  aiserver.v1.RecordBugbotDeeplinkEventRequest
+  aiserver.v1.RecordBugbotDeeplinkEventResponse
+  aiserver.v1.RevokeBugBotLicensesRequest
+  aiserver.v1.RevokeBugBotLicensesResponse
+  aiserver.v1.RevokeUserBugbotLicenseRequest
+  aiserver.v1.RevokeUserBugbotLicenseResponse
+  aiserver.v1.StartBugbotBackfillLearningRequest
+  aiserver.v1.StartBugbotBackfillLearningResponse
+  aiserver.v1.UpdateBugbotLearnedRuleRequest
+  aiserver.v1.UpdateBugbotLearnedRuleResponse
+  aiserver.v1.UpdateBugBotProUserSettingsRequest
+  aiserver.v1.UpdateBugBotProUserSettingsResponse
+  aiserver.v1.UpdateBugbotTeamRuleRequest
+  aiserver.v1.UpdateBugbotTeamRuleResponse
+  aiserver.v1.UpdateBugbotUserSettingsRequest
+  aiserver.v1.UpdateBugbotUserSettingsResponse
+  aiserver.v1.UpdateTeamBugbotSettingsRequest
+  aiserver.v1.UpdateTeamBugbotSettingsResponse
+
+### Plugin / Marketplace (84 types)
+  aiserver.v1.AddMarketplaceRequest
+  aiserver.v1.AddMarketplaceResponse
+  aiserver.v1.AddMcpServersFromPluginRequest
+  aiserver.v1.AddMcpServersFromPluginResponse
+  aiserver.v1.ApplyReindexPluginRepoRequest
+  aiserver.v1.ApplyReindexPluginRepoResponse
+  aiserver.v1.ApplyTeamMarketplaceRequiredPluginsRequest
+  aiserver.v1.ApplyTeamMarketplaceRequiredPluginsResponse
+  aiserver.v1.ApprovePluginRequest
+  aiserver.v1.ApprovePluginResponse
+  aiserver.v1.BatchGetPluginMcpConfigRequest
+  aiserver.v1.BatchGetPluginMcpConfigResponse
+  aiserver.v1.CheckPluginRepoUpdatesRequest
+  aiserver.v1.CheckPluginRepoUpdatesResponse
+  aiserver.v1.CreatePluginRequest
+  aiserver.v1.CreatePluginResponse
+  aiserver.v1.DeprecatePluginRequest
+  aiserver.v1.DeprecatePluginResponse
+  aiserver.v1.EffectivePlugin
+  aiserver.v1.FirstPartyPluginConfiguration
+  aiserver.v1.GetEffectiveUserPluginsRequest
+  aiserver.v1.GetEffectiveUserPluginsResponse
+  aiserver.v1.GetPluginMcpConfigRequest
+  aiserver.v1.GetPluginMcpConfigResponse
+  aiserver.v1.GetPluginRequest
+  aiserver.v1.GetPluginResponse
+  aiserver.v1.ImportPluginsFromGitHubRequest
+  aiserver.v1.ImportPluginsFromGitHubResponse
+  aiserver.v1.InstallTeamPluginRequest
+  aiserver.v1.InstallTeamPluginResponse
+  aiserver.v1.InstallUserPluginRequest
+  aiserver.v1.InstallUserPluginResponse
+  aiserver.v1.ListMarketplacePluginsRequest
+  aiserver.v1.ListMarketplacePluginsResponse
+  aiserver.v1.ListMarketplacesRequest
+  aiserver.v1.ListMarketplacesResponse
+  aiserver.v1.ListTeamPluginInstallsRequest
+  aiserver.v1.ListTeamPluginInstallsResponse
+  aiserver.v1.ListUserPluginInstallsRequest
+  aiserver.v1.ListUserPluginInstallsResponse
+  aiserver.v1.Marketplace
+  aiserver.v1.MarketplaceRequiredPluginInstall
+  aiserver.v1.ParsedPluginEntry
+  aiserver.v1.ParseGitHubRepoForPluginRequest
+  aiserver.v1.ParseGitHubRepoForPluginsResponse
+  aiserver.v1.Plugin
+  aiserver.v1.PluginMcpConfigEntry
+  aiserver.v1.PluginRef
+  aiserver.v1.PluginRepoRef
+  aiserver.v1.PluginRepoUpdateInfo
+  aiserver.v1.PreviewReindexPluginRepoRequest
+  aiserver.v1.PreviewReindexPluginRepoResponse
+  aiserver.v1.RefreshMarketplaceRequest
+  aiserver.v1.RefreshMarketplaceResponse
+  aiserver.v1.RegisteredPlugin
+  aiserver.v1.RegisterMarketplaceAndPluginsRequest
+  aiserver.v1.RegisterMarketplaceAndPluginsResponse
+  aiserver.v1.RegisterPluginEntry
+  aiserver.v1.ReindexAndApplyTeamMarketplaceChangesRequest
+  aiserver.v1.ReindexAndApplyTeamMarketplaceChangesResponse
+  aiserver.v1.ReindexPluginDiff
+  aiserver.v1.RejectPluginRequest
+  aiserver.v1.RejectPluginResponse
+  aiserver.v1.RemoveMarketplaceRequest
+  aiserver.v1.RemoveMarketplaceResponse
+  aiserver.v1.ResolvePluginsByRefRequest
+  aiserver.v1.ResolvePluginsByRefResponse
+  aiserver.v1.SubmitPluginForApprovalRequest
+  aiserver.v1.SubmitPluginForApprovalResponse
+  aiserver.v1.TeamMarketplaceConfig
+  aiserver.v1.TeamPluginInstall
+  aiserver.v1.UninstallTeamPluginRequest
+  aiserver.v1.UninstallTeamPluginResponse
+  aiserver.v1.UninstallUserPluginRequest
+  aiserver.v1.UninstallUserPluginResponse
+  aiserver.v1.UpdatePluginRequest
+  aiserver.v1.UpdatePluginResponse
+  aiserver.v1.UpdateTeamMarketplaceConfigRequest
+  aiserver.v1.UpdateTeamMarketplaceConfigResponse
+  aiserver.v1.UpdateTeamPluginInstallRequest
+  aiserver.v1.UpdateTeamPluginInstallResponse
+  aiserver.v1.UpdateUserPluginInstallRequest
+  aiserver.v1.UpdateUserPluginInstallResponse
+  aiserver.v1.UserPluginInstall
+
+### DeepSearch (5 types)
+  aiserver.v1.DeepSearchParams
+  aiserver.v1.DeepSearchResult
+  aiserver.v1.DeepSearchStream
+  aiserver.v1.DeepSearchSubagentParams
+  aiserver.v1.DeepSearchSubagentReturnValue
+
+### KnowledgeBase / Knowledge (6 types)
+  aiserver.v1.Knowledge
+  aiserver.v1.KnowledgeBaseParams
+  aiserver.v1.KnowledgeBaseResult
+  aiserver.v1.KnowledgeBaseStream
+  aiserver.v1.WebAcknowledgeGracePeriodDisclaimerRequest
+  aiserver.v1.WebAcknowledgeGracePeriodDisclaimerResponse
+
+### Background*Composer / BackgroundAgent (18 types)
+  aiserver.v1.BackgroundAgentSettings
+  aiserver.v1.BackgroundComposerFollowupParams
+  aiserver.v1.BackgroundComposerFollowupResult
+  aiserver.v1.BackgroundComposerFollowupStream
+  aiserver.v1.CreateBackgroundComposerSecretBatchRequest
+  aiserver.v1.CreateBackgroundComposerSecretBatchResponse
+  aiserver.v1.CreateBackgroundComposerSecretRequest
+  aiserver.v1.CreateBackgroundComposerSecretResponse
+  aiserver.v1.GetTeamBackgroundAgentSettingsRequest
+  aiserver.v1.GetTeamBackgroundAgentSettingsResponse
+  aiserver.v1.ListBackgroundComposerSecretsRequest
+  aiserver.v1.ListBackgroundComposerSecretsResponse
+  aiserver.v1.RevokeBackgroundComposerSecretRequest
+  aiserver.v1.RevokeBackgroundComposerSecretResponse
+  aiserver.v1.UpdateBackgroundComposerSecretRequest
+  aiserver.v1.UpdateBackgroundComposerSecretResponse
+  aiserver.v1.UpdateTeamBackgroundAgentSettingsRequest
+  aiserver.v1.UpdateTeamBackgroundAgentSettingsResponse
+
+### ServiceAccount (22 types)
+  aiserver.v1.ArchiveTeamServiceAccountRequest
+  aiserver.v1.ArchiveTeamServiceAccountResponse
+  aiserver.v1.CreateTeamServiceAccountRequest
+  aiserver.v1.CreateTeamServiceAccountResponse
+  aiserver.v1.DeleteTeamServiceAccountRequest
+  aiserver.v1.DeleteTeamServiceAccountResponse
+  aiserver.v1.GetServiceAccountSpendLimitRequest
+  aiserver.v1.GetServiceAccountSpendLimitResponse
+  aiserver.v1.GetTeamRepositoriesForServiceAccountScopeRequest
+  aiserver.v1.GetTeamRepositoriesForServiceAccountScopeResponse
+  aiserver.v1.ListTeamServiceAccountsRequest
+  aiserver.v1.ListTeamServiceAccountsResponse
+  aiserver.v1.RotateServiceAccountApiKeyRequest
+  aiserver.v1.RotateServiceAccountApiKeyResponse
+  aiserver.v1.ServiceAccountInfo
+  aiserver.v1.ServiceAccountKeyInfo
+  aiserver.v1.ServiceAccountScopeRepository
+  aiserver.v1.ServiceAccountSpendInfo
+  aiserver.v1.SetServiceAccountSpendLimitRequest
+  aiserver.v1.SetServiceAccountSpendLimitResponse
+  aiserver.v1.UpdateServiceAccountRepoScopeRequest
+  aiserver.v1.UpdateServiceAccountRepoScopeResponse
+
+### Experimental*Index (6 types)
+  aiserver.v1.CreateExperimentalIndexRequest
+  aiserver.v1.CreateExperimentalIndexResponse
+  aiserver.v1.ListenExperimentalIndexRequest
+  aiserver.v1.ListenExperimentalIndexResponse
+  aiserver.v1.ListExperimentalIndexFilesRequest
+  aiserver.v1.ListExperimentalIndexFilesResponse
+
+### ComputerUse (3 types)
+  aiserver.v1.ComputerUseParams
+  aiserver.v1.ComputerUseResult
+  aiserver.v1.ComputerUseStream
+
+### Sandbox (1 types)
+  aiserver.v1.AutoRunSandboxingControls
+
+### Privacy / Ghost (16 types)
+  aiserver.v1.GetTeamPrivacyModeForcedRequest
+  aiserver.v1.GetTeamPrivacyModeForcedResponse
+  aiserver.v1.GetUserPrivacyModeRequest
+  aiserver.v1.GetUserPrivacyModeResponse
+  aiserver.v1.NeedsPrivacyModeMigrationRequest
+  aiserver.v1.NeedsPrivacyModeMigrationResponse
+  aiserver.v1.PrivacyModeCacheInfo
+  aiserver.v1.SerializablePrivacyMode
+  aiserver.v1.SetUserPrivacyModeRequest
+  aiserver.v1.SetUserPrivacyModeResponse
+  aiserver.v1.SkipPrivacyModeGracePeriodRequest
+  aiserver.v1.SkipPrivacyModeGracePeriodResponse
+  aiserver.v1.SwitchTeamPrivacyModeRequest
+  aiserver.v1.SwitchTeamPrivacyModeResponse
+  aiserver.v1.UpdateTeamPrivacyModeMigrationOptOutRequest
+  aiserver.v1.UpdateTeamPrivacyModeMigrationOptOutResponse
+
+### Billing / Subscription / Payment / Invoice (16 types)
+  aiserver.v1.ChangeTeamSubscriptionRequest
+  aiserver.v1.ChangeTeamSubscriptionResponse
+  aiserver.v1.GetCurrentBillingCycleRequest
+  aiserver.v1.GetCurrentBillingCycleResponse
+  aiserver.v1.GetMonthlyBillingCycleRequest
+  aiserver.v1.GetMonthlyBillingCycleResponse
+  aiserver.v1.GetMonthlyInvoiceRequest
+  aiserver.v1.GetMonthlyInvoiceResponse
+  aiserver.v1.GetTeamHasValidPaymentMethodRequest
+  aiserver.v1.GetTeamHasValidPaymentMethodResponse
+  aiserver.v1.InvoiceCycle
+  aiserver.v1.InvoiceInfo
+  aiserver.v1.ListInvoiceCyclesRequest
+  aiserver.v1.ListInvoiceCyclesResponse
+  aiserver.v1.ListInvoicesRequest
+  aiserver.v1.ListInvoicesResponse
+
+### Team / Group (199 types)
+  aiserver.v1.AddGithubUsersToTeamRequest
+  aiserver.v1.AddGithubUsersToTeamResponse
+  aiserver.v1.AddGroupMembersRequest
+  aiserver.v1.AddGroupMembersResponse
+  aiserver.v1.ApplyTeamMarketplaceRequiredPluginsRequest
+  aiserver.v1.ApplyTeamMarketplaceRequiredPluginsResponse
+  aiserver.v1.ArchiveTeamServiceAccountRequest
+  aiserver.v1.ArchiveTeamServiceAccountResponse
+  aiserver.v1.BulkAssignGroupMembersRequest
+  aiserver.v1.BulkAssignGroupMembersResponse
+  aiserver.v1.ChangeTeamSubscriptionRequest
+  aiserver.v1.ChangeTeamSubscriptionResponse
+  aiserver.v1.CreateBugbotTeamRuleRequest
+  aiserver.v1.CreateBugbotTeamRuleResponse
+  aiserver.v1.CreateGroupRequest
+  aiserver.v1.CreateGroupResponse
+  aiserver.v1.CreateTeamApiKeyRequest
+  aiserver.v1.CreateTeamApiKeyResponse
+  aiserver.v1.CreateTeamCommandRequest
+  aiserver.v1.CreateTeamCommandResponse
+  aiserver.v1.CreateTeamFreeTrialCodeRequest
+  aiserver.v1.CreateTeamFreeTrialCodeResponse
+  aiserver.v1.CreateTeamHookRequest
+  aiserver.v1.CreateTeamHookResponse
+  aiserver.v1.CreateTeamRepoRequest
+  aiserver.v1.CreateTeamRepoResponse
+  aiserver.v1.CreateTeamRequest
+  aiserver.v1.CreateTeamResponse
+  aiserver.v1.CreateTeamRuleRequest
+  aiserver.v1.CreateTeamRuleResponse
+  aiserver.v1.CreateTeamServiceAccountRequest
+  aiserver.v1.CreateTeamServiceAccountResponse
+  aiserver.v1.CreateTeamWithFreeTrialRequest
+  aiserver.v1.CreateTeamWithFreeTrialResponse
+  aiserver.v1.DeleteBugbotTeamRuleRequest
+  aiserver.v1.DeleteBugbotTeamRuleResponse
+  aiserver.v1.DeleteGroupRequest
+  aiserver.v1.DeleteGroupResponse
+  aiserver.v1.DeleteTeamCommandRequest
+  aiserver.v1.DeleteTeamCommandResponse
+  aiserver.v1.DeleteTeamHookRequest
+  aiserver.v1.DeleteTeamHookResponse
+  aiserver.v1.DeleteTeamRepoRequest
+  aiserver.v1.DeleteTeamRepoResponse
+  aiserver.v1.DeleteTeamRuleRequest
+  aiserver.v1.DeleteTeamRuleResponse
+  aiserver.v1.DeleteTeamServiceAccountRequest
+  aiserver.v1.DeleteTeamServiceAccountResponse
+  aiserver.v1.DetachGroupFromDirectoryRequest
+  aiserver.v1.DetachGroupFromDirectoryResponse
+  aiserver.v1.DirectoryGroup
+  aiserver.v1.GetBaseTeamAdminSettingsRequest
+  aiserver.v1.GetBugbotTeamRulesRequest
+  aiserver.v1.GetBugbotTeamRulesResponse
+  aiserver.v1.GetDirectoryGroupsRequest
+  aiserver.v1.GetDirectoryGroupsResponse
+  aiserver.v1.GetGroupMembersRequest
+  aiserver.v1.GetGroupMembersResponse
+  aiserver.v1.GetGroupsRequest
+  aiserver.v1.GetGroupsResponse
+  aiserver.v1.GetJoinableTeamsByDomainRequest
+  aiserver.v1.GetJoinableTeamsByDomainResponse
+  aiserver.v1.GetLinearTeamsRequest
+  aiserver.v1.GetLinearTeamsResponse
+  aiserver.v1.GetSlackTeamSettingsRequest
+  aiserver.v1.GetSlackTeamSettingsResponse
+  aiserver.v1.GetTeamAdminSettingsRequest
+  aiserver.v1.GetTeamAdminSettingsResponse
+  aiserver.v1.GetTeamAnalyticsRequest
+  aiserver.v1.GetTeamAnalyticsResponse
+  aiserver.v1.GetTeamBackgroundAgentSettingsRequest
+  aiserver.v1.GetTeamBackgroundAgentSettingsResponse
+  aiserver.v1.GetTeamBugbotSettingsRequest
+  aiserver.v1.GetTeamBugbotSettingsResponse
+  aiserver.v1.GetTeamCommandsRequest
+  aiserver.v1.GetTeamCommandsResponse
+  aiserver.v1.GetTeamCustomerPortalUrlRequest
+  aiserver.v1.GetTeamCustomerPortalUrlResponse
+  aiserver.v1.GetTeamGithubUsersRequest
+  aiserver.v1.GetTeamGithubUsersResponse
+  aiserver.v1.GetTeamHasValidPaymentMethodRequest
+  aiserver.v1.GetTeamHasValidPaymentMethodResponse
+  aiserver.v1.GetTeamHooksRequest
+  aiserver.v1.GetTeamHooksResponse
+  aiserver.v1.GetTeamIdForReactivationRequest
+  aiserver.v1.GetTeamIdForReactivationResponse
+  aiserver.v1.GetTeamInviteLinkRequest
+  aiserver.v1.GetTeamInviteLinkResponse
+  aiserver.v1.GetTeamMemberDomainsRequest
+  aiserver.v1.GetTeamMemberDomainsResponse
+  aiserver.v1.GetTeamMembersRequest
+  aiserver.v1.GetTeamMembersResponse
+  aiserver.v1.GetTeamPrivacyModeForcedRequest
+  aiserver.v1.GetTeamPrivacyModeForcedResponse
+  aiserver.v1.GetTeamRawDataRequest
+  aiserver.v1.GetTeamRawDataResponse
+  aiserver.v1.GetTeamRepositoriesForServiceAccountScopeRequest
+  aiserver.v1.GetTeamRepositoriesForServiceAccountScopeResponse
+  aiserver.v1.GetTeamReposRequest
+  aiserver.v1.GetTeamReposResponse
+  aiserver.v1.GetTeamRulesRequest
+  aiserver.v1.GetTeamRulesResponse
+  aiserver.v1.GetTeamSharedConversationSettingsRequest
+  aiserver.v1.GetTeamSharedConversationSettingsResponse
+  aiserver.v1.GetTeamSpendRequest
+  aiserver.v1.GetTeamSpendResponse
+  aiserver.v1.GetTeamsRequest
+  aiserver.v1.GetTeamsResponse
+  aiserver.v1.GetTeamUsageRequest
+  aiserver.v1.GetTeamUsageResponse
+  aiserver.v1.Group
+  aiserver.v1.GroupAssignment
+  aiserver.v1.GroupMember
+  aiserver.v1.GroupMemberChange
+  aiserver.v1.IndividualLimitsOptOutTeamResult
+  aiserver.v1.InstallTeamPluginRequest
+  aiserver.v1.InstallTeamPluginResponse
+  aiserver.v1.JoinableTeam
+  aiserver.v1.JoinTeamByDomainRequest
+  aiserver.v1.JoinTeamByDomainResponse
+  aiserver.v1.LinearTeam
+  aiserver.v1.LinearTeamSettings
+  aiserver.v1.ListTeamApiKeysRequest
+  aiserver.v1.ListTeamApiKeysResponse
+  aiserver.v1.ListTeamInviteLinksRequest
+  aiserver.v1.ListTeamInviteLinksResponse
+  aiserver.v1.ListTeamPluginInstallsRequest
+  aiserver.v1.ListTeamPluginInstallsResponse
+  aiserver.v1.ListTeamServiceAccountsRequest
+  aiserver.v1.ListTeamServiceAccountsResponse
+  aiserver.v1.NotifyTeamAdminsRequest
+  aiserver.v1.NotifyTeamAdminsResponse
+  aiserver.v1.PreviewAttachGroupToDirectoryRequest
+  aiserver.v1.PreviewAttachGroupToDirectoryResponse
+  aiserver.v1.ReindexAndApplyTeamMarketplaceChangesRequest
+  aiserver.v1.ReindexAndApplyTeamMarketplaceChangesResponse
+  aiserver.v1.RemoveGroupMembersRequest
+  aiserver.v1.RemoveGroupMembersResponse
+  aiserver.v1.RevokeTeamApiKeyRequest
+  aiserver.v1.RevokeTeamApiKeyResponse
+  aiserver.v1.RevokeTeamInviteLinkRequest
+  aiserver.v1.RevokeTeamInviteLinkResponse
+  aiserver.v1.ScimConflictDirectoryGroup
+  aiserver.v1.SendTeamInviteRequest
+  aiserver.v1.SendTeamInviteResponse
+  aiserver.v1.SetTeamRepoTypeRequest
+  aiserver.v1.SetTeamRepoTypeResponse
+  aiserver.v1.SwitchTeamPrivacyModeRequest
+  aiserver.v1.SwitchTeamPrivacyModeResponse
+  aiserver.v1.Team
+  aiserver.v1.TeamCommand
+  aiserver.v1.TeamHook
+  aiserver.v1.TeamMarketplaceConfig
+  aiserver.v1.TeamMember
+  aiserver.v1.TeamMemberDomain
+  aiserver.v1.TeamMemberUsage
+  aiserver.v1.TeamMemberUsageData
+  aiserver.v1.TeamPluginInstall
+  aiserver.v1.TeamRoleCount
+  aiserver.v1.UninstallTeamPluginRequest
+  aiserver.v1.UninstallTeamPluginResponse
+  aiserver.v1.UpdateBugbotTeamRuleRequest
+  aiserver.v1.UpdateBugbotTeamRuleResponse
+  aiserver.v1.UpdateDirectoryGroupSettingsRequest
+  aiserver.v1.UpdateDirectoryGroupSettingsResponse
+  aiserver.v1.UpdateGithubInstallationTeamScopeRequest
+  aiserver.v1.UpdateGithubInstallationTeamScopeResponse
+  aiserver.v1.UpdateGroupRequest
+  aiserver.v1.UpdateGroupResponse
+  aiserver.v1.UpdateLinearTeamSettingRequest
+  aiserver.v1.UpdateLinearTeamSettingResponse
+  aiserver.v1.UpdateSlackTeamSettingsRequest
+  aiserver.v1.UpdateSlackTeamSettingsResponse
+  aiserver.v1.UpdateTeamAdminSettingsRequest
+  aiserver.v1.UpdateTeamAdminSettingsResponse
+  aiserver.v1.UpdateTeamBackgroundAgentSettingsRequest
+  aiserver.v1.UpdateTeamBackgroundAgentSettingsResponse
+  aiserver.v1.UpdateTeamBugbotSettingsRequest
+  aiserver.v1.UpdateTeamBugbotSettingsResponse
+  aiserver.v1.UpdateTeamCommandRequest
+  aiserver.v1.UpdateTeamCommandResponse
+  aiserver.v1.UpdateTeamDashboardAnalyticsSettingRequest
+  aiserver.v1.UpdateTeamDashboardAnalyticsSettingResponse
+  aiserver.v1.UpdateTeamDomainJoinSettingRequest
+  aiserver.v1.UpdateTeamDomainJoinSettingResponse
+  aiserver.v1.UpdateTeamHookRequest
+  aiserver.v1.UpdateTeamHookResponse
+  aiserver.v1.UpdateTeamMarketplaceConfigRequest
+  aiserver.v1.UpdateTeamMarketplaceConfigResponse
+  aiserver.v1.UpdateTeamNameRequest
+  aiserver.v1.UpdateTeamNameResponse
+  aiserver.v1.UpdateTeamPluginInstallRequest
+  aiserver.v1.UpdateTeamPluginInstallResponse
+  aiserver.v1.UpdateTeamPrivacyModeMigrationOptOutRequest
+  aiserver.v1.UpdateTeamPrivacyModeMigrationOptOutResponse
+  aiserver.v1.UpdateTeamRuleRequest
+  aiserver.v1.UpdateTeamRuleResponse
+  aiserver.v1.UpdateTeamSharedConversationSettingsRequest
+  aiserver.v1.UpdateTeamSharedConversationSettingsResponse
+
+### Secret / OAuth (22 types)
+  aiserver.v1.CreateBackgroundComposerSecretBatchRequest
+  aiserver.v1.CreateBackgroundComposerSecretBatchResponse
+  aiserver.v1.CreateBackgroundComposerSecretRequest
+  aiserver.v1.CreateBackgroundComposerSecretResponse
+  aiserver.v1.DeleteMcpOAuthTokenRequest
+  aiserver.v1.DeleteMcpOAuthTokenResponse
+  aiserver.v1.GetMcpOAuthPendingStateRequest
+  aiserver.v1.GetMcpOAuthPendingStateResponse
+  aiserver.v1.ListBackgroundComposerSecretsRequest
+  aiserver.v1.ListBackgroundComposerSecretsResponse
+  aiserver.v1.McpOAuthStoredClientInfo
+  aiserver.v1.McpOAuthStoredData
+  aiserver.v1.RevokeBackgroundComposerSecretRequest
+  aiserver.v1.RevokeBackgroundComposerSecretResponse
+  aiserver.v1.StoreMcpOAuthPendingStateRequest
+  aiserver.v1.StoreMcpOAuthPendingStateResponse
+  aiserver.v1.StoreMcpOAuthTokenRequest
+  aiserver.v1.StoreMcpOAuthTokenResponse
+  aiserver.v1.UpdateBackgroundComposerSecretRequest
+  aiserver.v1.UpdateBackgroundComposerSecretResponse
+  aiserver.v1.ValidateMcpOAuthTokensRequest
+  aiserver.v1.ValidateMcpOAuthTokensResponse
+
+### Audit (3 types)
+  aiserver.v1.AuditLogEvent
+  aiserver.v1.GetAuditLogsRequest
+  aiserver.v1.GetAuditLogsResponse
+
+### MCP (59 types)
+  aiserver.v1.AddMcpServersFromPluginRequest
+  aiserver.v1.AddMcpServersFromPluginResponse
+  aiserver.v1.AllowedMCPConfiguration
+  aiserver.v1.AllowedMCPServer
+  aiserver.v1.BatchGetPluginMcpConfigRequest
+  aiserver.v1.BatchGetPluginMcpConfigResponse
+  aiserver.v1.CallMcpToolParams
+  aiserver.v1.CallMcpToolResult
+  aiserver.v1.CallMcpToolStream
+  aiserver.v1.CheckHttpMcpStatusRequest
+  aiserver.v1.CheckHttpMcpStatusResponse
+  aiserver.v1.DeleteMcpOAuthTokenRequest
+  aiserver.v1.DeleteMcpOAuthTokenResponse
+  aiserver.v1.GetAvailableMcpServersRequest
+  aiserver.v1.GetAvailableMcpServersResponse
+  aiserver.v1.GetMcpConfigRequest
+  aiserver.v1.GetMcpConfigResponse
+  aiserver.v1.GetMcpOAuthPendingStateRequest
+  aiserver.v1.GetMcpOAuthPendingStateResponse
+  aiserver.v1.GetMcpToolsParams
+  aiserver.v1.GetMcpToolsResult
+  aiserver.v1.GetPluginMcpConfigRequest
+  aiserver.v1.GetPluginMcpConfigResponse
+  aiserver.v1.ListMcpResourcesParams
+  aiserver.v1.ListMcpResourcesResult
+  aiserver.v1.ListMcpResourcesStream
+  aiserver.v1.MarkMcpServersSeenRequest
+  aiserver.v1.MarkMcpServersSeenResponse
+  aiserver.v1.McpAuthParams
+  aiserver.v1.McpAuthResult
+  aiserver.v1.McpAuthStream
+  aiserver.v1.MCPControls
+  aiserver.v1.McpDescriptor
+  aiserver.v1.MCPInstructions
+  aiserver.v1.MCPKnownServerInfo
+  aiserver.v1.McpOAuthStoredClientInfo
+  aiserver.v1.McpOAuthStoredData
+  aiserver.v1.MCPParams
+  aiserver.v1.MCPResult
+  aiserver.v1.MCPServerRegistration
+  aiserver.v1.MCPStream
+  aiserver.v1.PluginMcpConfigEntry
+  aiserver.v1.ProbeMcpUrlRequest
+  aiserver.v1.ProbeMcpUrlResponse
+  aiserver.v1.ReadMcpResourceParams
+  aiserver.v1.ReadMcpResourceResult
+  aiserver.v1.ReadMcpResourceStream
+  aiserver.v1.SetMcpConfigRequest
+  aiserver.v1.SetMcpConfigResponse
+  aiserver.v1.StoreMcpOAuthPendingStateRequest
+  aiserver.v1.StoreMcpOAuthPendingStateResponse
+  aiserver.v1.StoreMcpOAuthTokenRequest
+  aiserver.v1.StoreMcpOAuthTokenResponse
+  aiserver.v1.SwGetMcpToolsRequest
+  aiserver.v1.SwGetMcpToolsResponse
+  aiserver.v1.UpdateUserDefaultMcpSettingsRequest
+  aiserver.v1.UpdateUserDefaultMcpSettingsResponse
+  aiserver.v1.ValidateMcpOAuthTokensRequest
+  aiserver.v1.ValidateMcpOAuthTokensResponse
+
+### Prompt / SystemPrompt (2 types)
+  aiserver.v1.GetPromptDryRunResponse
+  aiserver.v1.PromptDeeplinkControls
+
+### Context*Rank / Context*Window / Context*Piece (5 types)
+  aiserver.v1.ContextPiece
+  aiserver.v1.ContextPieceUpdate
+  aiserver.v1.ContextRerankingCandidateFile
+  aiserver.v1.ContextToRank
+  aiserver.v1.ContextWindowStatus
+
+### WebSearch / AiWebSearch (5 types)
+  aiserver.v1.AiWebSearchResult
+  aiserver.v1.AiWebSearchResults
+  aiserver.v1.WebSearchParams
+  aiserver.v1.WebSearchResult
+  aiserver.v1.WebSearchStream
+
+### Attribution (1 types)
+  aiserver.v1.AttributionControls
+
+### Token*Usage (3 types)
+  aiserver.v1.GetTokenUsageRequest
+  aiserver.v1.GetTokenUsageResponse
+  aiserver.v1.TokenUsage
+
+### ModelDetails / RequestedModel (1 types)
+  aiserver.v1.ModelDetails
+
+### Conversation*Message (2 types)
+  aiserver.v1.ConversationMessage
+  aiserver.v1.ConversationMessageHeader
+
+## Server-Side Streaming RPCs (identified by Params/Result/Stream triplets)
+  AskQuestion: AskQuestionParams -> stream AskQuestionStream (result: AskQuestionResult)
+  AwaitTask: AwaitTaskParams -> stream AwaitTaskStream (result: AwaitTaskResult)
+  BackgroundComposerFollowup: BackgroundComposerFollowupParams -> stream BackgroundComposerFollowupStream (result: BackgroundComposerFollowupResult)
+  CallMcpTool: CallMcpToolParams -> stream CallMcpToolStream (result: CallMcpToolResult)
+  ComputerUse: ComputerUseParams -> stream ComputerUseStream (result: ComputerUseResult)
+  CreateDiagram: CreateDiagramParams -> stream CreateDiagramStream (result: CreateDiagramResult)
+  CreatePlan: CreatePlanParams -> stream CreatePlanStream (result: CreatePlanResult)
+  DeepSearch: DeepSearchParams -> stream DeepSearchStream (result: DeepSearchResult)
+  DeleteFile: DeleteFileParams -> stream DeleteFileStream (result: DeleteFileResult)
+  EditFile: EditFileParams -> stream EditFileStream (result: EditFileResult)
+  EditFileV2: EditFileV2Params -> stream EditFileV2Stream (result: EditFileV2Result)
+  FetchPullRequest: FetchPullRequestParams -> stream FetchPullRequestStream (result: FetchPullRequestResult)
+  FetchRules: FetchRulesParams -> stream FetchRulesStream (result: FetchRulesResult)
+  FixLints: FixLintsParams -> stream FixLintsStream (result: FixLintsResult)
+  GlobFileSearch: GlobFileSearchParams -> stream GlobFileSearchStream (result: GlobFileSearchResult)
+  Gotodef: GotodefParams -> stream GotodefStream (result: GotodefResult)
+  KnowledgeBase: KnowledgeBaseParams -> stream KnowledgeBaseStream (result: KnowledgeBaseResult)
+  ListDir: ListDirParams -> stream ListDirStream (result: ListDirResult)
+  ListDirV2: ListDirV2Params -> stream ListDirV2Stream (result: ListDirV2Result)
+  ListMcpResources: ListMcpResourcesParams -> stream ListMcpResourcesStream (result: ListMcpResourcesResult)
+  MCP: MCPParams -> stream MCPStream (result: MCPResult)
+  McpAuth: McpAuthParams -> stream McpAuthStream (result: McpAuthResult)
+  ReadFile: ReadFileParams -> stream ReadFileStream (result: ReadFileResult)
+  ReadFileV2: ReadFileV2Params -> stream ReadFileV2Stream (result: ReadFileV2Result)
+  ReadLints: ReadLintsParams -> stream ReadLintsStream (result: ReadLintsResult)
+  ReadMcpResource: ReadMcpResourceParams -> stream ReadMcpResourceStream (result: ReadMcpResourceResult)
+  ReadProject: ReadProjectParams -> stream ReadProjectStream (result: ReadProjectResult)
+  ReadSemsearchFiles: ReadSemsearchFilesParams -> stream ReadSemsearchFilesStream (result: ReadSemsearchFilesResult)
+  Reapply: ReapplyParams -> stream ReapplyStream (result: ReapplyResult)
+  ReportBugfixResults: ReportBugfixResultsParams -> stream ReportBugfixResultsStream (result: ReportBugfixResultsResult)
+  RipgrepRawSearch: RipgrepRawSearchParams -> stream RipgrepRawSearchStream (result: RipgrepRawSearchResult)
+  RipgrepSearch: RipgrepSearchParams -> stream RipgrepSearchStream (result: RipgrepSearchResult)
+  RunTerminalCommandV2: RunTerminalCommandV2Params -> stream RunTerminalCommandV2Stream (result: RunTerminalCommandV2Result)
+  SearchSymbols: SearchSymbolsParams -> stream SearchSymbolsStream (result: SearchSymbolsResult)
+  SemanticSearchFull: SemanticSearchFullParams -> stream SemanticSearchFullStream (result: SemanticSearchFullResult)
+  SummarizeCode: SummarizeCodeParams -> stream SummarizeCodeStream (result: SummarizeCodeResult)
+  SwitchMode: SwitchModeParams -> stream SwitchModeStream (result: SwitchModeResult)
+  Task: TaskParams -> stream TaskStream (result: TaskResult)
+  TaskV2: TaskV2Params -> stream TaskV2Stream (result: TaskV2Result)
+  TodoRead: TodoReadParams -> stream TodoReadStream (result: TodoReadResult)
+  TodoWrite: TodoWriteParams -> stream TodoWriteStream (result: TodoWriteResult)
+  ToolCallFileSearch: ToolCallFileSearchParams -> stream ToolCallFileSearchStream (result: ToolCallFileSearchResult)
+  UpdateProject: UpdateProjectParams -> stream UpdateProjectStream (result: UpdateProjectResult)
+  WebFetch: WebFetchParams -> stream WebFetchStream (result: WebFetchResult)
+  WebSearch: WebSearchParams -> stream WebSearchStream (result: WebSearchResult)
+  WriteShellStdin: WriteShellStdinParams -> stream WriteShellStdinStream (result: WriteShellStdinResult)
+
+## Unary RPCs (identified by Request/Response pairs)
+  AcceptInvite: AcceptInviteRequest -> AcceptInviteResponse
+  ActivatePromotion: ActivatePromotionRequest -> ActivatePromotionResponse
+  AddGithubUsersToTeam: AddGithubUsersToTeamRequest -> AddGithubUsersToTeamResponse
+  AddGroupMembers: AddGroupMembersRequest -> AddGroupMembersResponse
+  AddMarketplace: AddMarketplaceRequest -> AddMarketplaceResponse
+  AddMcpServersFromPlugin: AddMcpServersFromPluginRequest -> AddMcpServersFromPluginResponse
+  AddRepoPattern: AddRepoPatternRequest -> AddRepoPatternResponse
+  AddUserToEarlyAccessList: AddUserToEarlyAccessListRequest -> AddUserToEarlyAccessListResponse
+  AdminRemoveRepository: AdminRemoveRepositoryRequest -> AdminRemoveRepositoryResponse
+  ApplyReindexPluginRepo: ApplyReindexPluginRepoRequest -> ApplyReindexPluginRepoResponse
+  ApplyTeamMarketplaceRequiredPlugins: ApplyTeamMarketplaceRequiredPluginsRequest -> ApplyTeamMarketplaceRequiredPluginsResponse
+  ApprovePlugin: ApprovePluginRequest -> ApprovePluginResponse
+  ArchiveTeamServiceAccount: ArchiveTeamServiceAccountRequest -> ArchiveTeamServiceAccountResponse
+  BatchGetPluginMcpConfig: BatchGetPluginMcpConfigRequest -> BatchGetPluginMcpConfigResponse
+  BatchRepositoryStatus: BatchRepositoryStatusRequest -> BatchRepositoryStatusResponse
+  BulkAssignGroupMembers: BulkAssignGroupMembersRequest -> BulkAssignGroupMembersResponse
+  CanStudentReverify: CanStudentReverifyRequest -> CanStudentReverifyResponse
+  ChangeSeat: ChangeSeatRequest -> ChangeSeatResponse
+  ChangeTeamSubscription: ChangeTeamSubscriptionRequest -> ChangeTeamSubscriptionResponse
+  CheckHttpMcpStatus: CheckHttpMcpStatusRequest -> CheckHttpMcpStatusResponse
+  CheckPluginRepoUpdates: CheckPluginRepoUpdatesRequest -> CheckPluginRepoUpdatesResponse
+  CheckPromotionEligibility: CheckPromotionEligibilityRequest -> CheckPromotionEligibilityResponse
+  CheckReferralAllowlist: CheckReferralAllowlistRequest -> CheckReferralAllowlistResponse
+  CheckReferralCode: CheckReferralCodeRequest -> CheckReferralCodeResponse
+  CheckUserApiKeyAccess: CheckUserApiKeyAccessRequest -> CheckUserApiKeyAccessResponse
+  ChooseCodeReferences: ChooseCodeReferencesRequest -> ChooseCodeReferencesResponse
+  ClientAction: ClientActionRequest -> ClientActionResponse
+  CompletedLinkSlackAccount: CompletedLinkSlackAccountRequest -> CompletedLinkSlackAccountResponse
+  ComputeIndexTopoSort: ComputeIndexTopoSortRequest -> ComputeIndexTopoSortResponse
+  ConfirmGithubInstallation: ConfirmGithubInstallationRequest -> ConfirmGithubInstallationResponse
+  ConnectGithubCallback: ConnectGithubCallbackRequest -> ConnectGithubCallbackResponse
+  ConnectLinearCallback: ConnectLinearCallbackRequest -> ConnectLinearCallbackResponse
+  ConnectPagerDutyCallback: ConnectPagerDutyCallbackRequest -> ConnectPagerDutyCallbackResponse
+  ConvertOALToNAL: ConvertOALToNALRequest -> ConvertOALToNALResponse
+  CreateBackgroundComposerSecret: CreateBackgroundComposerSecretRequest -> CreateBackgroundComposerSecretResponse
+  CreateBackgroundComposerSecretBatch: CreateBackgroundComposerSecretBatchRequest -> CreateBackgroundComposerSecretBatchResponse
+  CreateBugbotTeamRule: CreateBugbotTeamRuleRequest -> CreateBugbotTeamRuleResponse
+  CreateExperimentalIndex: CreateExperimentalIndexRequest -> CreateExperimentalIndexResponse
+  CreateGroup: CreateGroupRequest -> CreateGroupResponse
+  CreatePlugin: CreatePluginRequest -> CreatePluginResponse
+  CreateProtectedGitScope: CreateProtectedGitScopeRequest -> CreateProtectedGitScopeResponse
+  CreatePublisher: CreatePublisherRequest -> CreatePublisherResponse
+  CreateSlackRepoRoutingRule: CreateSlackRepoRoutingRuleRequest -> CreateSlackRepoRoutingRuleResponse
+  CreateTeam: CreateTeamRequest -> CreateTeamResponse
+  CreateTeamApiKey: CreateTeamApiKeyRequest -> CreateTeamApiKeyResponse
+  CreateTeamCommand: CreateTeamCommandRequest -> CreateTeamCommandResponse
+  CreateTeamFreeTrialCode: CreateTeamFreeTrialCodeRequest -> CreateTeamFreeTrialCodeResponse
+  CreateTeamHook: CreateTeamHookRequest -> CreateTeamHookResponse
+  CreateTeamRepo: CreateTeamRepoRequest -> CreateTeamRepoResponse
+  CreateTeamRule: CreateTeamRuleRequest -> CreateTeamRuleResponse
+  CreateTeamServiceAccount: CreateTeamServiceAccountRequest -> CreateTeamServiceAccountResponse
+  CreateTeamWithFreeTrial: CreateTeamWithFreeTrialRequest -> CreateTeamWithFreeTrialResponse
+  CreateUsageAlerts: CreateUsageAlertsRequest -> CreateUsageAlertsResponse
+  CreateUserApiKey: CreateUserApiKeyRequest -> CreateUserApiKeyResponse
+  DeleteAccount: DeleteAccountRequest -> DeleteAccountResponse
+  DeleteBedrockIamRole: DeleteBedrockIamRoleRequest -> DeleteBedrockIamRoleResponse
+  DeleteBugbotLearnedRule: DeleteBugbotLearnedRuleRequest -> DeleteBugbotLearnedRuleResponse
+  DeleteBugbotTeamRule: DeleteBugbotTeamRuleRequest -> DeleteBugbotTeamRuleResponse
+  DeleteGithubEnterpriseApp: DeleteGithubEnterpriseAppRequest -> DeleteGithubEnterpriseAppResponse
+  DeleteGitlabEnterpriseInstance: DeleteGitlabEnterpriseInstanceRequest -> DeleteGitlabEnterpriseInstanceResponse
+  DeleteGroup: DeleteGroupRequest -> DeleteGroupResponse
+  DeleteMcpOAuthToken: DeleteMcpOAuthTokenRequest -> DeleteMcpOAuthTokenResponse
+  DeleteProtectedGitScope: DeleteProtectedGitScopeRequest -> DeleteProtectedGitScopeResponse
+  DeleteSharedConversation: DeleteSharedConversationRequest -> DeleteSharedConversationResponse
+  DeleteSlackRepoRoutingRule: DeleteSlackRepoRoutingRuleRequest -> DeleteSlackRepoRoutingRuleResponse
+  DeleteTeamCommand: DeleteTeamCommandRequest -> DeleteTeamCommandResponse
+  DeleteTeamHook: DeleteTeamHookRequest -> DeleteTeamHookResponse
+  DeleteTeamRepo: DeleteTeamRepoRequest -> DeleteTeamRepoResponse
+  DeleteTeamRule: DeleteTeamRuleRequest -> DeleteTeamRuleResponse
+  DeleteTeamServiceAccount: DeleteTeamServiceAccountRequest -> DeleteTeamServiceAccountResponse
+  DeleteUsageAlerts: DeleteUsageAlertsRequest -> DeleteUsageAlertsResponse
+  DeprecatePlugin: DeprecatePluginRequest -> DeprecatePluginResponse
+  DetachGroupFromDirectory: DetachGroupFromDirectoryRequest -> DetachGroupFromDirectoryResponse
+  DisconnectGithub: DisconnectGithubRequest -> DisconnectGithubResponse
+  DisconnectLinear: DisconnectLinearRequest -> DisconnectLinearResponse
+  DisconnectPagerDuty: DisconnectPagerDutyRequest -> DisconnectPagerDutyResponse
+  DocumentationQuery: DocumentationQueryRequest -> DocumentationQueryResponse
+  EnableOnDemandSpend: EnableOnDemandSpendRequest -> EnableOnDemandSpendResponse
+  EnsureIndexCreated: EnsureIndexCreatedRequest -> EnsureIndexCreatedResponse
+  ExtractPaths: ExtractPathsRequest -> ExtractPathsResponse
+  FastRepoInitHandshake: FastRepoInitHandshakeRequest -> FastRepoInitHandshakeResponse
+  FastRepoInitHandshakeV2: FastRepoInitHandshakeV2Request -> FastRepoInitHandshakeV2Response
+  FastRepoSyncComplete: FastRepoSyncCompleteRequest -> FastRepoSyncCompleteResponse
+  FastUpdateFile: FastUpdateFileRequest -> FastUpdateFileResponse
+  FastUpdateFileV2: FastUpdateFileV2Request -> FastUpdateFileV2Response
+  FetchAllInstallationRepos: FetchAllInstallationReposRequest -> FetchAllInstallationReposResponse
+  FinishSetupGithubEnterpriseApp: FinishSetupGithubEnterpriseAppRequest -> FinishSetupGithubEnterpriseAppResponse
+  FinishUpdateRepo: FinishUpdateRepoRequest -> FinishUpdateRepoResponse
+  FinishUploadRepo: FinishUploadRepoRequest -> FinishUploadRepoResponse
+  GetActivationCheckoutUrl: GetActivationCheckoutUrlRequest -> GetActivationCheckoutUrlResponse
+  GetActiveOffboardingBanner: GetActiveOffboardingBannerRequest -> GetActiveOffboardingBannerResponse
+  GetAdminNotificationStatus: GetAdminNotificationStatusRequest -> GetAdminNotificationStatusResponse
+  GetAdvancedAnalyticsEnabled: GetAdvancedAnalyticsEnabledRequest -> GetAdvancedAnalyticsEnabledResponse
+  GetAggregatedUsageEvents: GetAggregatedUsageEventsRequest -> GetAggregatedUsageEventsResponse
+  GetAuditLogs: GetAuditLogsRequest -> GetAuditLogsResponse
+  GetAvailableChunkingStrategies: GetAvailableChunkingStrategiesRequest -> GetAvailableChunkingStrategiesResponse
+  GetAvailableMcpServers: GetAvailableMcpServersRequest -> GetAvailableMcpServersResponse
+  GetBugbotAnalyticsV2: GetBugbotAnalyticsV2Request -> GetBugbotAnalyticsV2Response
+  GetBugbotBackfillStatus: GetBugbotBackfillStatusRequest -> GetBugbotBackfillStatusResponse
+  GetBugbotLearnedRules: GetBugbotLearnedRulesRequest -> GetBugbotLearnedRulesResponse
+  GetBugBotPRAnalytics: GetBugBotPRAnalyticsRequest -> GetBugBotPRAnalyticsResponse
+  GetBugBotProUserSettings: GetBugBotProUserSettingsRequest -> GetBugBotProUserSettingsResponse
+  GetBugbotRuleAnalytics: GetBugbotRuleAnalyticsRequest -> GetBugbotRuleAnalyticsResponse
+  GetBugbotRuleById: GetBugbotRuleByIdRequest -> GetBugbotRuleByIdResponse
+  GetBugbotSettings: GetBugbotSettingsRequest -> GetBugbotSettingsResponse
+  GetBugbotTeamRules: GetBugbotTeamRulesRequest -> GetBugbotTeamRulesResponse
+  GetBugbotUserSettings: GetBugbotUserSettingsRequest -> GetBugbotUserSettingsResponse
+  GetCliDownloadUrl: GetCliDownloadUrlRequest -> GetCliDownloadUrlResponse
+  GetClientUsageData: GetClientUsageDataRequest -> GetClientUsageDataResponse
+  GetCopyStatus: GetCopyStatusRequest -> GetCopyStatusResponse
+  GetCreditGrantsBalance: GetCreditGrantsBalanceRequest -> GetCreditGrantsBalanceResponse
+  GetCurrentBillingCycle: GetCurrentBillingCycleRequest -> GetCurrentBillingCycleResponse
+  GetCurrentPeriodUsage: GetCurrentPeriodUsageRequest -> GetCurrentPeriodUsageResponse
+  GetDailySpendByCategory: GetDailySpendByCategoryRequest -> GetDailySpendByCategoryResponse
+  GetDiff: GetDiffRequest -> GetDiffResponse
+  GetDirectoryGroups: GetDirectoryGroupsRequest -> GetDirectoryGroupsResponse
+  GetDownloadLink: GetDownloadLinkRequest -> GetDownloadLinkResponse
+  GetEffectiveUserPlugins: GetEffectiveUserPluginsRequest -> GetEffectiveUserPluginsResponse
+  GetEmbeddings: GetEmbeddingsRequest -> GetEmbeddingsResponse
+  GetEnterpriseCTAEligibility: GetEnterpriseCTAEligibilityRequest -> GetEnterpriseCTAEligibilityResponse
+  GetFastRequests: GetFastRequestsRequest -> GetFastRequestsResponse
+  GetFilteredUsageEvents: GetFilteredUsageEventsRequest -> GetFilteredUsageEventsResponse
+  GetGithubInstallations: GetGithubInstallationsRequest -> GetGithubInstallationsResponse
+  GetGlobalCommands: GetGlobalCommandsRequest -> GetGlobalCommandsResponse
+  GetGlobalLeaderboardOptIn: GetGlobalLeaderboardOptInRequest -> GetGlobalLeaderboardOptInResponse
+  GetGroupMembers: GetGroupMembersRequest -> GetGroupMembersResponse
+  GetGroups: GetGroupsRequest -> GetGroupsResponse
+  GetHardLimit: GetHardLimitRequest -> GetHardLimitResponse
+  GetHighLevelFolderDescription: GetHighLevelFolderDescriptionRequest -> GetHighLevelFolderDescriptionResponse
+  GetInstallationGithubUsers: GetInstallationGithubUsersRequest -> GetInstallationGithubUsersResponse
+  GetInstallationRepos: GetInstallationReposRequest -> GetInstallationReposResponse
+  GetJoinableTeamsByDomain: GetJoinableTeamsByDomainRequest -> GetJoinableTeamsByDomainResponse
+  GetKnownServers: GetKnownServersRequest -> GetKnownServersResponse
+  GetLinearAuthUrl: GetLinearAuthUrlRequest -> GetLinearAuthUrlResponse
+  GetLinearIssues: GetLinearIssuesRequest -> GetLinearIssuesResponse
+  GetLinearLabels: GetLinearLabelsRequest -> GetLinearLabelsResponse
+  GetLinearSettings: GetLinearSettingsRequest -> GetLinearSettingsResponse
+  GetLinearStatus: GetLinearStatusRequest -> GetLinearStatusResponse
+  GetLinearTeams: GetLinearTeamsRequest -> GetLinearTeamsResponse
+  GetLineNumberClassifications: GetLineNumberClassificationsRequest -> GetLineNumberClassificationsResponse
+  GetLintsForChange: GetLintsForChangeRequest -> GetLintsForChangeResponse
+  GetMarketingEmailOpt: GetMarketingEmailOptRequest -> GetMarketingEmailOptResponse
+  GetMcpConfig: GetMcpConfigRequest -> GetMcpConfigResponse
+  GetMcpOAuthPendingState: GetMcpOAuthPendingStateRequest -> GetMcpOAuthPendingStateResponse
+  GetMe: GetMeRequest -> GetMeResponse
+  GetMonthlyBillingCycle: GetMonthlyBillingCycleRequest -> GetMonthlyBillingCycleResponse
+  GetMonthlyInvoice: GetMonthlyInvoiceRequest -> GetMonthlyInvoiceResponse
+  GetNumFilesToSend: GetNumFilesToSendRequest -> GetNumFilesToSendResponse
+  GetPagerDutyAuthUrl: GetPagerDutyAuthUrlRequest -> GetPagerDutyAuthUrlResponse
+  GetPagerDutyServices: GetPagerDutyServicesRequest -> GetPagerDutyServicesResponse
+  GetPagerDutyStatus: GetPagerDutyStatusRequest -> GetPagerDutyStatusResponse
+  GetPlanInfo: GetPlanInfoRequest -> GetPlanInfoResponse
+  GetPlugin: GetPluginRequest -> GetPluginResponse
+  GetPluginMcpConfig: GetPluginMcpConfigRequest -> GetPluginMcpConfigResponse
+  GetPricingHistory: GetPricingHistoryRequest -> GetPricingHistoryResponse
+  GetPRIndexingStatus: GetPRIndexingStatusRequest -> GetPRIndexingStatusResponse
+  GetProtectedGitScopes: GetProtectedGitScopesRequest -> GetProtectedGitScopesResponse
+  GetPublicSharedConversation: GetPublicSharedConversationRequest -> GetPublicSharedConversationResponse
+  GetPublicSlackInstallUrl: GetPublicSlackInstallUrlRequest -> GetPublicSlackInstallUrlResponse
+  GetPublicSlackInstallUrlWithUserScopes: GetPublicSlackInstallUrlWithUserScopesRequest -> GetPublicSlackInstallUrlWithUserScopesResponse
+  GetPublisher: GetPublisherRequest -> GetPublisherResponse
+  GetPullRequestForBranch: GetPullRequestForBranchRequest -> GetPullRequestForBranchResponse
+  GetReferralCodes: GetReferralCodesRequest -> GetReferralCodesResponse
+  GetReferrals: GetReferralsRequest -> GetReferralsResponse
+  GetRemainingRefunds: GetRemainingRefundsRequest -> GetRemainingRefundsResponse
+  GetScimConfigurationLinks: GetScimConfigurationLinksRequest -> GetScimConfigurationLinksResponse
+  GetScimConflicts: GetScimConflictsRequest -> GetScimConflictsResponse
+  GetServiceAccountSpendLimit: GetServiceAccountSpendLimitRequest -> GetServiceAccountSpendLimitResponse
+  GetSharedConversation: GetSharedConversationRequest -> GetSharedConversationResponse
+  GetSignUpType: GetSignUpTypeRequest -> GetSignUpTypeResponse
+  GetSlackInstallUrl: GetSlackInstallUrlRequest -> GetSlackInstallUrlResponse
+  GetSlackModelOptions: GetSlackModelOptionsRequest -> GetSlackModelOptionsResponse
+  GetSlackRepoRoutingRules: GetSlackRepoRoutingRulesRequest -> GetSlackRepoRoutingRulesResponse
+  GetSlackSettings: GetSlackSettingsRequest -> GetSlackSettingsResponse
+  GetSlackTeamSettings: GetSlackTeamSettingsRequest -> GetSlackTeamSettingsResponse
+  GetSlackUserSettings: GetSlackUserSettingsRequest -> GetSlackUserSettingsResponse
+  GetSsoConfigurationLinks: GetSsoConfigurationLinksRequest -> GetSsoConfigurationLinksResponse
+  GetTeamAdminSettings: GetTeamAdminSettingsRequest -> GetTeamAdminSettingsResponse
+  GetTeamAnalytics: GetTeamAnalyticsRequest -> GetTeamAnalyticsResponse
+  GetTeamBackgroundAgentSettings: GetTeamBackgroundAgentSettingsRequest -> GetTeamBackgroundAgentSettingsResponse
+  GetTeamBugbotSettings: GetTeamBugbotSettingsRequest -> GetTeamBugbotSettingsResponse
+  GetTeamCommands: GetTeamCommandsRequest -> GetTeamCommandsResponse
+  GetTeamCustomerPortalUrl: GetTeamCustomerPortalUrlRequest -> GetTeamCustomerPortalUrlResponse
+  GetTeamGithubUsers: GetTeamGithubUsersRequest -> GetTeamGithubUsersResponse
+  GetTeamHasValidPaymentMethod: GetTeamHasValidPaymentMethodRequest -> GetTeamHasValidPaymentMethodResponse
+  GetTeamHooks: GetTeamHooksRequest -> GetTeamHooksResponse
+  GetTeamIdForReactivation: GetTeamIdForReactivationRequest -> GetTeamIdForReactivationResponse
+  GetTeamInviteLink: GetTeamInviteLinkRequest -> GetTeamInviteLinkResponse
+  GetTeamMemberDomains: GetTeamMemberDomainsRequest -> GetTeamMemberDomainsResponse
+  GetTeamMembers: GetTeamMembersRequest -> GetTeamMembersResponse
+  GetTeamPrivacyModeForced: GetTeamPrivacyModeForcedRequest -> GetTeamPrivacyModeForcedResponse
+  GetTeamRawData: GetTeamRawDataRequest -> GetTeamRawDataResponse
+  GetTeamRepos: GetTeamReposRequest -> GetTeamReposResponse
+  GetTeamRepositoriesForServiceAccountScope: GetTeamRepositoriesForServiceAccountScopeRequest -> GetTeamRepositoriesForServiceAccountScopeResponse
+  GetTeamRules: GetTeamRulesRequest -> GetTeamRulesResponse
+  GetTeams: GetTeamsRequest -> GetTeamsResponse
+  GetTeamSharedConversationSettings: GetTeamSharedConversationSettingsRequest -> GetTeamSharedConversationSettingsResponse
+  GetTeamSpend: GetTeamSpendRequest -> GetTeamSpendResponse
+  GetTeamUsage: GetTeamUsageRequest -> GetTeamUsageResponse
+  GetTokenUsage: GetTokenUsageRequest -> GetTokenUsageResponse
+  GetUploadLimits: GetUploadLimitsRequest -> GetUploadLimitsResponse
+  GetUsageBasedPremiumRequests: GetUsageBasedPremiumRequestsRequest -> GetUsageBasedPremiumRequestsResponse
+  GetUsageLimitPolicyStatus: GetUsageLimitPolicyStatusRequest -> GetUsageLimitPolicyStatusResponse
+  GetUsageLimitStatusAndActiveGrants: GetUsageLimitStatusAndActiveGrantsRequest -> GetUsageLimitStatusAndActiveGrantsResponse
+  GetUserAdminOrganizations: GetUserAdminOrganizationsRequest -> GetUserAdminOrganizationsResponse
+  GetUserAnalytics: GetUserAnalyticsRequest -> GetUserAnalyticsResponse
+  GetUserPrivacyMode: GetUserPrivacyModeRequest -> GetUserPrivacyModeResponse
+  GetUserPullRequests: GetUserPullRequestsRequest -> GetUserPullRequestsResponse
+  GetUserReviewRequests: GetUserReviewRequestsRequest -> GetUserReviewRequestsResponse
+  GetYearlyUpgradeEligibility: GetYearlyUpgradeEligibilityRequest -> GetYearlyUpgradeEligibilityResponse
+  ImportPluginsFromGitHub: ImportPluginsFromGitHubRequest -> ImportPluginsFromGitHubResponse
+  InstallTeamPlugin: InstallTeamPluginRequest -> InstallTeamPluginResponse
+  InstallUserPlugin: InstallUserPluginRequest -> InstallUserPluginResponse
+  IsAllowedFreeTrialUsage: IsAllowedFreeTrialUsageRequest -> IsAllowedFreeTrialUsageResponse
+  IsLoggedIn: IsLoggedInRequest -> IsLoggedInResponse
+  IsNextSetupRunFree: IsNextSetupRunFreeRequest -> IsNextSetupRunFreeResponse
+  IsOnNewPricing: IsOnNewPricingRequest -> IsOnNewPricingResponse
+  JoinTeamByDomain: JoinTeamByDomainRequest -> JoinTeamByDomainResponse
+  ListBackgroundComposerSecrets: ListBackgroundComposerSecretsRequest -> ListBackgroundComposerSecretsResponse
+  ListenExperimentalIndex: ListenExperimentalIndexRequest -> ListenExperimentalIndexResponse
+  ListExperimentalIndexFiles: ListExperimentalIndexFilesRequest -> ListExperimentalIndexFilesResponse
+  ListGithubEnterpriseApps: ListGithubEnterpriseAppsRequest -> ListGithubEnterpriseAppsResponse
+  ListGitlabEnterpriseInstances: ListGitlabEnterpriseInstancesRequest -> ListGitlabEnterpriseInstancesResponse
+  ListInvoiceCycles: ListInvoiceCyclesRequest -> ListInvoiceCyclesResponse
+  ListInvoices: ListInvoicesRequest -> ListInvoicesResponse
+  ListMarketplacePlugins: ListMarketplacePluginsRequest -> ListMarketplacePluginsResponse
+  ListMarketplaces: ListMarketplacesRequest -> ListMarketplacesResponse
+  ListPublishers: ListPublishersRequest -> ListPublishersResponse
+  ListSharedConversations: ListSharedConversationsRequest -> ListSharedConversationsResponse
+  ListSlackConversations: ListSlackConversationsRequest -> ListSlackConversationsResponse
+  ListTeamApiKeys: ListTeamApiKeysRequest -> ListTeamApiKeysResponse
+  ListTeamInviteLinks: ListTeamInviteLinksRequest -> ListTeamInviteLinksResponse
+  ListTeamPluginInstalls: ListTeamPluginInstallsRequest -> ListTeamPluginInstallsResponse
+  ListTeamServiceAccounts: ListTeamServiceAccountsRequest -> ListTeamServiceAccountsResponse
+  ListUsageAlerts: ListUsageAlertsRequest -> ListUsageAlertsResponse
+  ListUserApiKeys: ListUserApiKeysRequest -> ListUserApiKeysResponse
+  ListUserPluginInstalls: ListUserPluginInstallsRequest -> ListUserPluginInstallsResponse
+  LogClickedConnectSlack: LogClickedConnectSlackRequest -> LogClickedConnectSlackResponse
+  Login: LoginRequest -> LoginResponse
+  Logout: LogoutRequest -> LogoutResponse
+  LogSlackbotAuthConversionFunnel: LogSlackbotAuthConversionFunnelRequest -> LogSlackbotAuthConversionFunnelResponse
+  MarkMcpServersSeen: MarkMcpServersSeenRequest -> MarkMcpServersSeenResponse
+  NeedsPrivacyModeMigration: NeedsPrivacyModeMigrationRequest -> NeedsPrivacyModeMigrationResponse
+  NotifyTeamAdmins: NotifyTeamAdminsRequest -> NotifyTeamAdminsResponse
+  OptOutNewPricing: OptOutNewPricingRequest -> OptOutNewPricingResponse
+  PollLogin: PollLoginRequest -> PollLoginResponse
+  PrepareSetupGithubEnterpriseApp: PrepareSetupGithubEnterpriseAppRequest -> PrepareSetupGithubEnterpriseAppResponse
+  PreviewAttachGroupToDirectory: PreviewAttachGroupToDirectoryRequest -> PreviewAttachGroupToDirectoryResponse
+  PreviewReindexPluginRepo: PreviewReindexPluginRepoRequest -> PreviewReindexPluginRepoResponse
+  ProbeMcpUrl: ProbeMcpUrlRequest -> ProbeMcpUrlResponse
+  RecordBugbotDeeplinkEvent: RecordBugbotDeeplinkEventRequest -> RecordBugbotDeeplinkEventResponse
+  RedeemGiftCode: RedeemGiftCodeRequest -> RedeemGiftCodeResponse
+  RefreshMarketplace: RefreshMarketplaceRequest -> RefreshMarketplaceResponse
+  RegisterCodeReferences: RegisterCodeReferencesRequest -> RegisterCodeReferencesResponse
+  RegisterFileToIndex: RegisterFileToIndexRequest -> RegisterFileToIndexResponse
+  RegisterGithubCursorCode: RegisterGithubCursorCodeRequest -> RegisterGithubCursorCodeResponse
+  RegisterMarketplaceAndPlugins: RegisterMarketplaceAndPluginsRequest -> RegisterMarketplaceAndPluginsResponse
+  ReindexAndApplyTeamMarketplaceChanges: ReindexAndApplyTeamMarketplaceChangesRequest -> ReindexAndApplyTeamMarketplaceChangesResponse
+  RejectPlugin: RejectPluginRequest -> RejectPluginResponse
+  RemoveGroupMembers: RemoveGroupMembersRequest -> RemoveGroupMembersResponse
+  RemoveMarketplace: RemoveMarketplaceRequest -> RemoveMarketplaceResponse
+  RemoveMember: RemoveMemberRequest -> RemoveMemberResponse
+  RemoveRepoHistory: RemoveRepoHistoryRequest -> RemoveRepoHistoryResponse
+  RemoveRepoPattern: RemoveRepoPatternRequest -> RemoveRepoPatternResponse
+  RemoveRepository: RemoveRepositoryRequest -> RemoveRepositoryResponse
+  RepoHistoryInitHandshake: RepoHistoryInitHandshakeRequest -> RepoHistoryInitHandshakeResponse
+  RepoHistorySyncComplete: RepoHistorySyncCompleteRequest -> RepoHistorySyncCompleteResponse
+  RepoHistorySyncOne: RepoHistorySyncOneRequest -> RepoHistorySyncOneResponse
+  Repositories: RepositoriesRequest -> RepositoriesResponse
+  RepositoryStatus: RepositoryStatusRequest -> RepositoryStatusResponse
+  RequestIndividualLimitsOptOut: RequestIndividualLimitsOptOutRequest -> RequestIndividualLimitsOptOutResponse
+  RerankDocuments: RerankDocumentsRequest -> RerankDocumentsResponse
+  ResolvePluginsByRef: ResolvePluginsByRefRequest -> ResolvePluginsByRefResponse
+  RevokeBackgroundComposerSecret: RevokeBackgroundComposerSecretRequest -> RevokeBackgroundComposerSecretResponse
+  RevokeBugBotLicenses: RevokeBugBotLicensesRequest -> RevokeBugBotLicensesResponse
+  RevokeTeamApiKey: RevokeTeamApiKeyRequest -> RevokeTeamApiKeyResponse
+  RevokeTeamInviteLink: RevokeTeamInviteLinkRequest -> RevokeTeamInviteLinkResponse
+  RevokeUserApiKey: RevokeUserApiKeyRequest -> RevokeUserApiKeyResponse
+  RevokeUserBugbotLicense: RevokeUserBugbotLicenseRequest -> RevokeUserBugbotLicenseResponse
+  RotateServiceAccountApiKey: RotateServiceAccountApiKeyRequest -> RotateServiceAccountApiKeyResponse
+  SearchPRHistory: SearchPRHistoryRequest -> SearchPRHistoryResponse
+  SearchRepository: SearchRepositoryRequest -> SearchRepositoryResponse
+  SearchRepositoryDeepContext: SearchRepositoryDeepContextRequest -> SearchRepositoryDeepContextResponse
+  SemSearch: SemSearchRequest -> SemSearchResponse
+  SendDownloadEmail: SendDownloadEmailRequest -> SendDownloadEmailResponse
+  SendTeamInvite: SendTeamInviteRequest -> SendTeamInviteResponse
+  SetAdminOnlyUsagePricing: SetAdminOnlyUsagePricingRequest -> SetAdminOnlyUsagePricingResponse
+  SetGlobalLeaderboardOptIn: SetGlobalLeaderboardOptInRequest -> SetGlobalLeaderboardOptInResponse
+  SetHardLimit: SetHardLimitRequest -> SetHardLimitResponse
+  SetMcpConfig: SetMcpConfigRequest -> SetMcpConfigResponse
+  SetServiceAccountSpendLimit: SetServiceAccountSpendLimitRequest -> SetServiceAccountSpendLimitResponse
+  SetSlackAuth: SetSlackAuthRequest -> SetSlackAuthResponse
+  SetTeamRepoType: SetTeamRepoTypeRequest -> SetTeamRepoTypeResponse
+  SetupGitlabEnterpriseInstance: SetupGitlabEnterpriseInstanceRequest -> SetupGitlabEnterpriseInstanceResponse
+  SetupIndexDependencies: SetupIndexDependenciesRequest -> SetupIndexDependenciesResponse
+  SetUsageBasedPremiumRequests: SetUsageBasedPremiumRequestsRequest -> SetUsageBasedPremiumRequestsResponse
+  SetUserHardLimit: SetUserHardLimitRequest -> SetUserHardLimitResponse
+  SetUserMonthlyLimit: SetUserMonthlyLimitRequest -> SetUserMonthlyLimitResponse
+  SetUserPrivacyMode: SetUserPrivacyModeRequest -> SetUserPrivacyModeResponse
+  ShadowHealthCheck: ShadowHealthCheckRequest -> ShadowHealthCheckResponse
+  ShareConversation: ShareConversationRequest -> ShareConversationResponse
+  SkipPrivacyModeGracePeriod: SkipPrivacyModeGracePeriodRequest -> SkipPrivacyModeGracePeriodResponse
+  StartBugbotBackfillLearning: StartBugbotBackfillLearningRequest -> StartBugbotBackfillLearningResponse
+  StartUpdateRepo: StartUpdateRepoRequest -> StartUpdateRepoResponse
+  StartUploadRepo: StartUploadRepoRequest -> StartUploadRepoResponse
+  StoreMcpOAuthPendingState: StoreMcpOAuthPendingStateRequest -> StoreMcpOAuthPendingStateResponse
+  StoreMcpOAuthToken: StoreMcpOAuthTokenRequest -> StoreMcpOAuthTokenResponse
+  StreamUnifiedChat: StreamUnifiedChatRequest -> StreamUnifiedChatResponse
+  SubmitFeedback: SubmitFeedbackRequest -> SubmitFeedbackResponse
+  SubmitPluginForApproval: SubmitPluginForApprovalRequest -> SubmitPluginForApprovalResponse
+  SubscribeRepository: SubscribeRepositoryRequest -> SubscribeRepositoryResponse
+  SummarizeWithReferences: SummarizeWithReferencesRequest -> SummarizeWithReferencesResponse
+  SwCallClientSideV2Tool: SwCallClientSideV2ToolRequest -> SwCallClientSideV2ToolResponse
+  SwCallDiagnosticsExecutor: SwCallDiagnosticsExecutorRequest -> SwCallDiagnosticsExecutorResponse
+  SwCompileRepoIncludeExcludePatterns: SwCompileRepoIncludeExcludePatternsRequest -> SwCompileRepoIncludeExcludePatternsResponse
+  SwGetEnvironmentInfo: SwGetEnvironmentInfoRequest -> SwGetEnvironmentInfoResponse
+  SwGetExplicitContext: SwGetExplicitContextRequest -> SwGetExplicitContextResponse
+  SwGetLinterErrors: SwGetLinterErrorsRequest -> SwGetLinterErrorsResponse
+  SwGetMcpTools: SwGetMcpToolsRequest -> SwGetMcpToolsResponse
+  SwitchTeamPrivacyMode: SwitchTeamPrivacyModeRequest -> SwitchTeamPrivacyModeResponse
+  SwProvideTemporaryAccessToken: SwProvideTemporaryAccessTokenRequest -> SwProvideTemporaryAccessTokenResponse
+  SwSyncIndex: SwSyncIndexRequest -> SwSyncIndexResponse
+  SwTrackModel: SwTrackModelRequest -> SwTrackModelResponse
+  SwWriteTextFileWithLints: SwWriteTextFileWithLintsRequest -> SwWriteTextFileWithLintsResponse
+  SyncGitlabRepos: SyncGitlabReposRequest -> SyncGitlabReposResponse
+  SyncMerkleSubtree: SyncMerkleSubtreeRequest -> SyncMerkleSubtreeResponse
+  SyncMerkleSubtreeV2: SyncMerkleSubtreeV2Request -> SyncMerkleSubtreeV2Response
+  SyncRepository: SyncRepositoryRequest -> SyncRepositoryResponse
+  ToggleMarketingEmailOpt: ToggleMarketingEmailOptRequest -> ToggleMarketingEmailOptResponse
+  UninstallTeamPlugin: UninstallTeamPluginRequest -> UninstallTeamPluginResponse
+  UninstallUserPlugin: UninstallUserPluginRequest -> UninstallUserPluginResponse
+  UnlinkSlackAccess: UnlinkSlackAccessRequest -> UnlinkSlackAccessResponse
+  UnsubscribeRepository: UnsubscribeRepositoryRequest -> UnsubscribeRepositoryResponse
+  UpdateAllGithubRepoSettings: UpdateAllGithubRepoSettingsRequest -> UpdateAllGithubRepoSettingsResponse
+  UpdateBackgroundComposerSecret: UpdateBackgroundComposerSecretRequest -> UpdateBackgroundComposerSecretResponse
+  UpdateBugbotLearnedRule: UpdateBugbotLearnedRuleRequest -> UpdateBugbotLearnedRuleResponse
+  UpdateBugBotProUserSettings: UpdateBugBotProUserSettingsRequest -> UpdateBugBotProUserSettingsResponse
+  UpdateBugbotTeamRule: UpdateBugbotTeamRuleRequest -> UpdateBugbotTeamRuleResponse
+  UpdateBugbotUserSettings: UpdateBugbotUserSettingsRequest -> UpdateBugbotUserSettingsResponse
+  UpdateDirectoryGroupSettings: UpdateDirectoryGroupSettingsRequest -> UpdateDirectoryGroupSettingsResponse
+  UpdateFastRequests: UpdateFastRequestsRequest -> UpdateFastRequestsResponse
+  UpdateFile: UpdateFileRequest -> UpdateFileResponse
+  UpdateGithubInstallationSettings: UpdateGithubInstallationSettingsRequest -> UpdateGithubInstallationSettingsResponse
+  UpdateGithubInstallationTeamScope: UpdateGithubInstallationTeamScopeRequest -> UpdateGithubInstallationTeamScopeResponse
+  UpdateGithubRepoSettings: UpdateGithubRepoSettingsRequest -> UpdateGithubRepoSettingsResponse
+  UpdateGroup: UpdateGroupRequest -> UpdateGroupResponse
+  UpdateLinearProjectSetting: UpdateLinearProjectSettingRequest -> UpdateLinearProjectSettingResponse
+  UpdateLinearTeamSetting: UpdateLinearTeamSettingRequest -> UpdateLinearTeamSettingResponse
+  UpdatePlugin: UpdatePluginRequest -> UpdatePluginResponse
+  UpdatePublisher: UpdatePublisherRequest -> UpdatePublisherResponse
+  UpdateRole: UpdateRoleRequest -> UpdateRoleResponse
+  UpdateSelfGithubAllowlist: UpdateSelfGithubAllowlistRequest -> UpdateSelfGithubAllowlistResponse
+  UpdateServiceAccountRepoScope: UpdateServiceAccountRepoScopeRequest -> UpdateServiceAccountRepoScopeResponse
+  UpdateSharedConversationVisibility: UpdateSharedConversationVisibilityRequest -> UpdateSharedConversationVisibilityResponse
+  UpdateSlackRepoRoutingRule: UpdateSlackRepoRoutingRuleRequest -> UpdateSlackRepoRoutingRuleResponse
+  UpdateSlackTeamSettings: UpdateSlackTeamSettingsRequest -> UpdateSlackTeamSettingsResponse
+  UpdateSlackUserSettings: UpdateSlackUserSettingsRequest -> UpdateSlackUserSettingsResponse
+  UpdateTeamAdminSettings: UpdateTeamAdminSettingsRequest -> UpdateTeamAdminSettingsResponse
+  UpdateTeamBackgroundAgentSettings: UpdateTeamBackgroundAgentSettingsRequest -> UpdateTeamBackgroundAgentSettingsResponse
+  UpdateTeamBugbotSettings: UpdateTeamBugbotSettingsRequest -> UpdateTeamBugbotSettingsResponse
+  UpdateTeamCommand: UpdateTeamCommandRequest -> UpdateTeamCommandResponse
+  UpdateTeamDashboardAnalyticsSetting: UpdateTeamDashboardAnalyticsSettingRequest -> UpdateTeamDashboardAnalyticsSettingResponse
+  UpdateTeamDomainJoinSetting: UpdateTeamDomainJoinSettingRequest -> UpdateTeamDomainJoinSettingResponse
+  UpdateTeamHook: UpdateTeamHookRequest -> UpdateTeamHookResponse
+  UpdateTeamMarketplaceConfig: UpdateTeamMarketplaceConfigRequest -> UpdateTeamMarketplaceConfigResponse
+  UpdateTeamName: UpdateTeamNameRequest -> UpdateTeamNameResponse
+  UpdateTeamPluginInstall: UpdateTeamPluginInstallRequest -> UpdateTeamPluginInstallResponse
+  UpdateTeamPrivacyModeMigrationOptOut: UpdateTeamPrivacyModeMigrationOptOutRequest -> UpdateTeamPrivacyModeMigrationOptOutResponse
+  UpdateTeamRule: UpdateTeamRuleRequest -> UpdateTeamRuleResponse
+  UpdateTeamSharedConversationSettings: UpdateTeamSharedConversationSettingsRequest -> UpdateTeamSharedConversationSettingsResponse
+  UpdateUsageAlerts: UpdateUsageAlertsRequest -> UpdateUsageAlertsResponse
+  UpdateUserDefaultMcpSettings: UpdateUserDefaultMcpSettingsRequest -> UpdateUserDefaultMcpSettingsResponse
+  UpdateUserName: UpdateUserNameRequest -> UpdateUserNameResponse
+  UpdateUserPluginInstall: UpdateUserPluginInstallRequest -> UpdateUserPluginInstallResponse
+  UpgradeScope: UpgradeScopeRequest -> UpgradeScopeResponse
+  UpgradeToYearly: UpgradeToYearlyRequest -> UpgradeToYearlyResponse
+  UploadFile: UploadFileRequest -> UploadFileResponse
+  UploadRepository: UploadRepositoryRequest -> UploadRepositoryResponse
+  ValidateBedrockIamRole: ValidateBedrockIamRoleRequest -> ValidateBedrockIamRoleResponse
+  ValidateMcpOAuthTokens: ValidateMcpOAuthTokensRequest -> ValidateMcpOAuthTokensResponse
+  WebAcknowledgeGracePeriodDisclaimer: WebAcknowledgeGracePeriodDisclaimerRequest -> WebAcknowledgeGracePeriodDisclaimerResponse
