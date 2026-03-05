@@ -38,6 +38,16 @@ Reverse-engineered from inside a live Cursor Background Agent sandbox (March 202
 - [Sandbox Verification](#sandbox-verification)
 - [Evidence Sources](#evidence-sources)
 - [Protocol and Runtime Findings](#protocol-and-runtime-findings)
+- [End-to-End Session & Chat Flow](#end-to-end-session--chat-flow)
+  - [The Full Connection Chain](#the-full-connection-chain)
+  - [Stage 1: Cursor IDE to AI Server](#stage-1-cursor-ide-to-ai-server)
+  - [Stage 2: AI Server to LLM Provider](#stage-2-ai-server-to-llm-provider)
+  - [Stage 3: Orchestrator to Exec Daemon (Tool Execution)](#stage-3-orchestrator-to-exec-daemon-tool-execution)
+  - [Stage 4: The Agent Continuation Loop](#stage-4-the-agent-continuation-loop)
+  - [Stage 5: Streaming Results Back to the UI](#stage-5-streaming-results-back-to-the-ui)
+  - [Where Conversation State Lives](#where-conversation-state-lives)
+  - [What the Exec Daemon Is NOT](#what-the-exec-daemon-is-not)
+  - [Network Proof](#network-proof)
 - [Advanced Protocol Findings](#advanced-protocol-findings)
   - [StreamUnifiedChatRequest](#streamunifiedchatrequest-63-fields)
   - [Tool Execution Hooks](#tool-execution-hooks-pretooluse--posttooluse)
@@ -2191,6 +2201,217 @@ At `~/.cursor/agent-hooks/`:
 - MIGRATE_TO_SKILLS_CONTENT (127 lines)
 - UPDATE_CURSOR_SETTINGS_CONTENT (114 lines)
 - SHELL_COMMAND_CONTENT (18 lines)
+
+---
+
+## End-to-End Session & Chat Flow
+
+This section ties together all the protocol, network, and runtime findings into a single narrative: what happens when you type a message in Cursor and how it reaches the daemon, the LLM, and back to your screen.
+
+**Key insight:** Your Cursor IDE never talks to the exec-daemon directly. The daemon has no concept of "sessions" or "chat history." It is a stateless tool executor. Chat sessions live between the IDE and the AI server.
+
+### The Full Connection Chain
+
+```
+Cursor IDE (your laptop)
+    │
+    │  HTTPS/gRPC to api2.cursor.sh
+    │  StreamUnifiedChatRequest (63-field protobuf)
+    │  Auth: user's OAuth access_token
+    ▼
+AI Server ("aiserver", Fastify, AWS)
+    │
+    │  Assembles system prompt from RequestContext
+    │  Calls LLM API (api.anthropic.com / others)
+    │  Returns InteractionUpdate stream
+    │  When tool calls come back, routes to orchestrator
+    ▼
+VM Orchestrator (K8s, 192.168.24.21)
+    │
+    │  Connect-RPC to exec-daemon
+    │  POST /agent.v1.ExecService/Exec (port 26053)
+    │  Auth: Bearer <sha256-hex auth-token>
+    ▼
+Exec Daemon (inside container, Node.js)
+    │
+    │  Executes tool calls locally (shell, file read/write, grep, etc.)
+    │  Returns results back up the chain
+    ▼
+cursorsandbox (Rust, policy enforcement per-command)
+```
+
+Four hops, three auth boundaries, two protobuf schemas.
+
+### Stage 1: Cursor IDE to AI Server
+
+When you type a message, the IDE sends a `StreamUnifiedChatRequest` directly to `api2.cursor.sh` (Cursor's AI server). This is the **only** connection the IDE makes for chat. Key fields:
+
+| Field | Purpose |
+|-------|---------|
+| `conversation_id` | Empty = new chat, otherwise resumes existing session |
+| `conversation` | Full message history (may be truncated, with `full_conversation_headers_only` as backup) |
+| `unified_mode` | CHAT=1, AGENT=2, EDIT=3, CUSTOM=4, PLAN=5, DEBUG=6 |
+| `is_background_composer` | `true` for background agent sessions |
+| `background_composer_id` | Links to a specific background agent container |
+| `model_details` | Which model to use (resolved server-side to specific variants) |
+| `context_bank_session_id` + `context_bank_encryption_key` | Encrypted conversation cache (user-provided key, server cannot read without it) |
+
+Auth: The user's OAuth access token (from `authentication.cursor.sh`) authenticates this call. This token **never enters the sandbox container** — it stays server-side in the orchestrator.
+
+### Stage 2: AI Server to LLM Provider
+
+The AI server receives the `StreamUnifiedChatRequest` from the IDE. Separately, it receives a `RequestContext` from the exec-daemon (via the orchestrator calling `request_context_args`). The `RequestContext` (~265KB) contains:
+
+- Environment info (OS, shell, timezone, workspace paths)
+- All cursor rules (`.cursor/rules/*.mdc`, `AGENTS.md`, `CLAUDE.md`, `.cursorrules`)
+- Cloud rules (`.cursor/CLOUD.md`)
+- Agent skills (`SKILL.md` files)
+- Git repo info (branches, status, remotes)
+- MCP tool definitions (from all connected servers)
+- Custom subagent definitions
+
+The AI server then:
+1. Assembles the actual system prompt text (wrapping content in `<rules>`, `<user_info>`, `<system_reminder>` XML tags)
+2. Adds tool definitions (builtin + MCP)
+3. Applies cursor rules by type (`global`=always, `fileGlobbed`=on match, `agentFetched`=on-demand)
+4. Calls the LLM API directly — network captures show 3 persistent connections to `api.anthropic.com:443`
+
+The system prompt text/template lives **server-side**, not in the exec-daemon. This means Cursor can update prompt engineering without redeploying the daemon.
+
+### Stage 3: Orchestrator to Exec Daemon (Tool Execution)
+
+When the LLM responds with tool calls, the AI server does not execute them itself. It routes them through the orchestrator to the exec-daemon via Connect-RPC:
+
+```
+POST /agent.v1.ExecService/Exec  (port 26053)
+Content-Type: application/connect+json (envelope-framed)
+Authorization: Bearer <sha256-hex-token>
+```
+
+The orchestrator sends a single `ExecServerMessage` specifying the tool type:
+
+| Tool Type | What It Does |
+|-----------|-------------|
+| `shell_args` | Execute shell command via PTY |
+| `read_args` / `redacted_read_args` | Read file (with optional secret redaction) |
+| `write_args` | Write file |
+| `delete_args` | Delete file |
+| `grep_args` | Ripgrep search |
+| `ls_args` | List directory |
+| `mcp_args` | Call MCP tool |
+| `computer_use_args` | Mouse/keyboard/screenshot via X11 |
+| `subagent_args` | Spawn or resume a subagent |
+| `fetch_args` | HTTP fetch |
+| `record_screen_args` | Screen recording |
+| `shell_stream_args` | Streaming shell execution |
+| `background_shell_spawn_args` | Background shell process |
+
+The exec-daemon executes the tool locally (through `cursorsandbox` for policy enforcement), then streams back `ExecClientMessage` results. A final `ExecClientControlMessage.stream_close` marks completion.
+
+Before and after each tool execution, the exec-daemon runs the **hook pipeline**:
+
+```
+Tool Call → PreToolUse hook → Execute → PostToolUse hook → Result
+```
+
+PreToolUse hooks can `allow`, `deny`, `ask` (prompt user), or **modify tool parameters** via `updated_input`. PostToolUse hooks can inject `additional_context` (e.g., lint errors after file edits).
+
+### Stage 4: The Agent Continuation Loop
+
+The continuation loop (think → act → observe → repeat) runs **client-side on the exec-daemon**, not on the server. The server processes one request at a time and is stateless per-request.
+
+The server provides a `ClientContinuationConfig`:
+
+```
+idle_threshold:    N       // consecutive idle iterations before escape
+max_loops:         M       // hard cap (0 = unlimited)
+nudge_message:     "..."   // sent when model produces no tool calls
+escape_message_template: "..." // contains random {escape_token}
+collect_background_children: bool
+```
+
+**Loop algorithm:**
+1. Exec-daemon sends conversation state to AI server (via `AgentRunRequest`)
+2. AI server streams back `InteractionUpdate` messages (text deltas, tool calls, thinking blocks)
+3. Exec-daemon executes any tool calls locally
+4. If no tool calls: increment idle counter
+5. If idle but below threshold: send `nudge_message` to keep model working
+6. If idle >= threshold: send `escape_message_template` with a **randomly generated** escape token
+7. If model echoes the escape token: loop exits (intentional completion signal)
+8. If total iterations >= `max_loops`: loop exits (hard cap)
+9. After loop: if `collect_background_children`, wait for subagent results
+
+The random escape token prevents the model from learning a fixed exit sequence and using it prematurely.
+
+### Stage 5: Streaming Results Back to the UI
+
+The exec-daemon streams `InteractionUpdate` messages back through the orchestrator to the Cursor IDE. There are 19 update types, each mapping to a specific UI element:
+
+| Update Type | What You See in the UI |
+|------------|----------------------|
+| `text_delta` | Text appearing character by character |
+| `thinking_delta` / `thinking_completed` | Collapsible "Thinking..." block |
+| `tool_call_started` / `tool_call_completed` | Tool call cards (shell commands, file edits) |
+| `partial_tool_call` / `tool_call_delta` | Streaming tool call arguments |
+| `shell_output_delta` | Terminal output streaming in real-time |
+| `step_started` / `step_completed` | Step progress indicators |
+| `turn_ended` | Agent stops and waits for user input |
+| `token_delta` | Token usage counter updates |
+| `prompt_suggestion` | Suggested follow-up prompt buttons |
+| `post_request_prompt` | Upgrade/announcement prompts with clickable buttons |
+| `summary` / `summary_started` / `summary_completed` | Conversation summary |
+| `heartbeat` | Keep-alive (invisible to user) |
+| `user_message_appended` | Confirms user message was added |
+
+### Where Conversation State Lives
+
+Conversation state is managed between the AI server and the IDE client, **not** in the exec-daemon. The `ConversationStateStructure` persists across turns:
+
+```protobuf
+ConversationStateStructure {
+    root_prompt_messages_json: bytes[]      // blob-stored messages
+    turns: bytes[]                          // serialized conversation turns
+    todos: bytes[]                          // task tracking items
+    pending_tool_calls: string[]            // tool calls awaiting execution
+    file_states_v2: map<string, bytes>      // tracked file changes
+    subagent_states: map<string, state>     // persisted subagent conversations
+    summary_archives: bytes[]               // compressed old messages
+    mode: AgentMode                         // AGENT, ASK, PLAN, DEBUG, TRIAGE, PROJECT
+    read_paths: string[]                    // files read during conversation
+    self_summary_count: uint32              // auto-summary counter
+}
+```
+
+Messages use a **blob-store pattern** — content is stored as binary blobs referenced by ID. When a conversation resumes, `hydrateMessages()` reconstructs the full history from archived summaries + current prompt tail. Long conversations are compressed via `summary_archives`.
+
+### What the Exec Daemon Is NOT
+
+The exec-daemon is **not** a chat server. It exposes three services, none of which handle chat:
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| `agent.v1.ExecService` | 26053 | Execute tool calls from the orchestrator |
+| `agent.v1.ControlService` | 26053 | File CRUD, git ops, artifacts, env vars (16 RPCs) |
+| `agent.v1.PtyHostService` | 26054 (WebSocket) | Terminal access (spawn/attach/resize PTY) |
+
+The only "context-aware" thing exec-daemon does is respond to `request_context_args` — the orchestrator asks "give me everything you know about this workspace" and the exec-daemon assembles a `RequestContext` protobuf with rules, tools, env info, and skills. This gets sent to the AI server for system prompt construction.
+
+The exec-daemon drives the agent continuation loop, but the **chat session, message history, and model inference** all live on the AI server side. The daemon is purely the hands — never the brain.
+
+### Network Proof
+
+Live `/proc/net/tcp` captures from inside the sandbox confirm the connection topology:
+
+| Connection | Direction | Purpose |
+|-----------|-----------|---------|
+| `192.168.24.21 → 172.30.0.2:26500` | Inbound | Orchestrator → pod-daemon |
+| `192.168.24.21 → 172.30.0.2:26053` | Inbound | Orchestrator → exec-daemon |
+| `172.30.0.2 → 160.79.104.10:443` | Outbound (×3) | Exec-daemon → `api.anthropic.com` |
+| `172.30.0.2 → 34.149.66.137:443` | Outbound | Exec-daemon → Google (likely Gemini for command classification) |
+| `172.30.0.2 → 172.64.155.209:443` | Outbound | Exec-daemon → Cloudflare (`cursor.com` CDN/proxy) |
+| `192.168.24.21 → 172.30.0.2:26058` | Inbound | Orchestrator → noVNC/websockify (desktop streaming) |
+
+The exec-daemon makes **outbound** LLM API calls but receives **inbound** tool execution commands from the orchestrator. It never receives chat messages from the IDE directly.
 
 ---
 
