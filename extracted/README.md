@@ -1,7 +1,7 @@
 # Extracted Artifacts Index
 
 This folder contains raw extracted files and evidence used to build the architecture reference.
-If you are new to the repo, read [`docs/KEY_FINDINGS.md`](../docs/KEY_FINDINGS.md) first and treat this directory as optional deep evidence.
+If you are new to the repo, read the [`Key Findings Snapshot`](../README.md#key-findings-snapshot) in the root `README.md` first and treat this directory as optional deep evidence.
 
 ## Directory Map
 
