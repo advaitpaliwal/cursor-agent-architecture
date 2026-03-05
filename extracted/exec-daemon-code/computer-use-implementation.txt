@@ -1,0 +1,185 @@
+# Computer Use & Screen Recording - Complete Implementation
+# How Cursor's agent controls the desktop via X11
+# Source: exec-daemon webpack bundle
+
+## Architecture Overview
+
+The computer use system allows the LLM to control the desktop through:
+1. X11 display via xdotool for mouse/keyboard input
+2. ffmpeg for screenshots (x11grab -> WebP) and screen recording
+3. Coordinate scaling between API resolution and display resolution
+4. Input event logging with precise timing for replay
+
+## ComputerUseAction (agent.v1) - 11 Action Types
+
+### Actions (oneof)
+  mouse_move (1):     MouseMoveAction       # Move cursor to coordinate
+  click (2):          ClickAction           # Click with button, count, modifiers
+  mouse_down (3):     MouseDownAction       # Press mouse button
+  mouse_up (4):       MouseUpAction         # Release mouse button
+  drag (5):           DragAction            # Multi-point drag path
+  scroll (6):         ScrollAction          # Scroll in direction with amount
+  type (7):           TypeAction            # Type text string
+  key (8):            KeyAction             # Press key combo (xdotool-style)
+  wait (9):           WaitAction            # Wait for duration
+  screenshot (10):    ScreenshotAction      # Capture current screen
+  cursor_position (11): CursorPositionAction # Get current cursor position
+
+### Coordinate System
+  - Coordinates are in API resolution (e.g., 1280x800), NOT display resolution
+  - CoordinateScaler converts between API and display coordinates
+  - Coordinate message: { x: int32, y: int32 }
+
+## MouseButton Enum
+  UNSPECIFIED = 0  -> defaults to LEFT (button 1)
+  LEFT        = 1  -> xdotool button 1
+  RIGHT       = 2  -> xdotool button 3
+  MIDDLE      = 3  -> xdotool button 2
+  BACK        = 4  -> xdotool button 8
+  FORWARD     = 5  -> xdotool button 9
+
+## ScrollDirection Enum
+  UNSPECIFIED = 0  -> defaults to DOWN (button 5)
+  UP          = 1  -> xdotool button 4
+  DOWN        = 2  -> xdotool button 5
+  LEFT        = 3  -> xdotool button 6
+  RIGHT       = 4  -> xdotool button 7
+
+## X11Executor Implementation
+
+### Configuration
+  displayNum: string             # X11 display (e.g., "1")
+  resolution: { api, display }   # API and display resolutions
+  screenshotDelayMs: number      # Delay before screenshot (DEFAULT_SCREENSHOT_DELAY_MS)
+  typingDelayMs: number          # Inter-key delay (DEFAULT_TYPING_DELAY_MS)
+  typingBatchSize: number        # Characters per xdotool batch (DEFAULT_TYPING_BATCH_SIZE)
+
+### Execution Flow
+  1. Process actions sequentially
+  2. For screenshot actions: wait delay, capture with ffmpeg
+  3. For cursor_position: use xdotool getmouselocation --shell
+  4. For all other actions: execute via xdotool, log event if recording
+  5. If no explicit screenshot was taken: take final screenshot automatically
+  6. Return { success, screenshot (base64), cursorPosition, actionCount, durationMs }
+
+### Action Implementations
+
+#### mouse_move
+  xdotool mousemove --sync {scaled_x} {scaled_y}
+
+#### click (with modifier support)
+  1. keydown {modifier1} keydown {modifier2} ...
+  2. mousemove --sync {x} {y}  (if coordinate provided)
+  3. click [--repeat {count} --delay 50] {buttonNum}
+  4. keyup {modifier2} keyup {modifier1}  (reverse order)
+
+#### drag (multi-point path)
+  1. mousemove --sync {start_x} {start_y}
+  2. mousedown {buttonNum}
+  3. For each subsequent point: mousemove --sync {x} {y}
+  4. mouseup {buttonNum}
+
+#### scroll (with modifier support)
+  1. keydown modifiers
+  2. mousemove --sync {x} {y}  (if coordinate provided)
+  3. click --repeat {amount} {scrollButton}
+  4. keyup modifiers (reverse order)
+
+#### type (newline-aware)
+  Text split by \r\n|\r|\n into segments.
+  Each segment typed in batches:
+    xdotool type --delay {typingDelayMs} -- {chunk}
+  Between segments: xdotool key Return
+  (xdotool sends Linefeed for \n, but apps expect Return/Enter)
+
+#### key (with hold duration)
+  If holdDurationMs > 0:
+    xdotool keydown {key}
+    sleep(holdDurationMs)
+    xdotool keyup {key}
+  Else:
+    xdotool key -- {key}
+  Key format: xdotool-style (e.g., "ctrl+a", "Return", "Alt+Left")
+
+### Screenshot Implementation
+  ffmpeg -f x11grab -video_size {display_width}x{display_height}
+    -i :{displayNum} -frames:v 1
+    -vf scale={api_width}:{api_height}
+    -c:v libwebp -preset text -lossless 1
+    -f webp pipe:1
+
+  Output: base64-encoded WebP image
+  Post-processing: Fix WebP RIFF headers (ffmpeg can't seek in pipes,
+    so RIFF and VP8 chunk sizes are 0 — patched in memory)
+
+## Screen Recording System
+
+### RecordingMode Enum
+  UNSPECIFIED       = 0
+  START_RECORDING   = 1   # Begin recording
+  SAVE_RECORDING    = 2   # Stop and save
+  DISCARD_RECORDING = 3   # Stop and delete
+
+### RecordScreenArgs
+  mode (1): RecordingMode
+  requested_file_name (2): optional string  # Filename (no slashes allowed)
+
+### RecordScreenResult (oneof)
+  start_success (1): RecordScreenStartSuccess
+  save_success (2): RecordScreenSaveSuccess { file_path, duration_ms, file_size_bytes }
+  discard_success (3): RecordScreenDiscardSuccess
+  failure (4): RecordScreenFailure
+
+### RequestedFilePathRejectedReason
+  UNSPECIFIED       = 0
+  SLASHES_NOT_ALLOWED = 1  # Filename cannot contain path separators
+
+### Recording Infrastructure
+  - RECORDING_STAGING_DIR: Temporary storage during recording
+  - ARTIFACTS_DIR: Final output directory (0o777 permissions)
+  - Uses ffmpeg for x11grab capture
+  - InputEventLogger captures precise event timing alongside recording
+
+### InputEventLogger
+  Records computer use events with precise timing:
+  - Timestamp when xdotool command COMPLETED (ms since recording start)
+  - Action type and parameters
+  - Used for event-sourced replay of recordings
+
+## Metrics
+  computer_use.session.duration_ms: Histogram of session durations
+  computer_use.session.action_count: Histogram of actions per session
+  computer_use.session.result: Counter by outcome (success/failure)
+
+## Key Implementation Details
+
+### 1. Automatic Final Screenshot
+  Every computer use invocation returns a screenshot.
+  If the model didn't explicitly request one, a final screenshot
+  is automatically taken after all actions complete.
+
+### 2. Coordinate Scaling
+  The model works in a fixed API resolution (e.g., 1280x800).
+  The actual display may be different (e.g., 1920x1200).
+  CoordinateScaler handles bidirectional conversion.
+
+### 3. Modifier Key Management
+  Click and scroll actions support modifier keys (ctrl, shift, alt, etc.).
+  Keys are held down BEFORE the action and released AFTER in reverse order.
+  Modifier strings can be combos: "ctrl+shift" splits into ["ctrl", "shift"].
+
+### 4. Text Input Batching
+  Long text is typed in batches of typingBatchSize characters.
+  This prevents xdotool from timing out on very long strings.
+  Newlines are converted to Return key presses.
+
+### 5. WebP Header Fix
+  ffmpeg can't seek in pipe output, so WebP RIFF headers have 0 sizes.
+  The code patches the headers in memory:
+  - Offset 4: RIFF size = buffer.length - 8
+  - Offset 16: VP8 chunk size = buffer.length - 20
+  Only for simple VP8 (non-lossless, non-extended) WebP files.
+
+### 6. Environment Isolation
+  All xdotool commands run with DISPLAY=:{displayNum}
+  This prevents interference with other displays.
