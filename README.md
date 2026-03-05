@@ -1,18 +1,43 @@
 # Cursor Agent Architecture
 
-Reverse-engineered architecture reference for Cursor Background Agent runtime.
+A reverse-engineered breakdown of how Cursor Background Agent actually runs in production-style sandboxes.
+
+This repo is not a vague overview. It includes runtime topology, daemon roles, tool/RPC surfaces, sandbox behavior, and raw extracted evidence.
 
 ## Index
 
+- [Why This Is Interesting](#why-this-is-interesting)
+- [What You Can Verify Here](#what-you-can-verify-here)
 - [Architecture Snapshot](#architecture-snapshot)
 - [System Diagram](#system-diagram)
-- [Component Index](#component-index)
+- [Core Components](#core-components)
 - [Runtime Surface](#runtime-surface)
 - [Security and Isolation Model](#security-and-isolation-model)
-- [Evidence Sources](#evidence-sources)
+- [Evidence You Can Inspect](#evidence-you-can-inspect)
 - [Repository Map](#repository-map)
 - [Deep-Dive Index](#deep-dive-index)
 - [Regenerate Findings Snapshot](#regenerate-findings-snapshot)
+
+## Why This Is Interesting
+
+Most “AI agent architecture” writeups are speculative. This one is evidence-backed.
+
+You can inspect:
+
+- Control/runtime split across `pod-daemon`, `exec-daemon`, and `cursorsandbox`
+- gRPC and tool surfaces extracted from runtime artifacts
+- Desktop automation stack (`XFCE + VNC + noVNC + Chrome`)
+- Docker workload support and network/service layout
+- sandbox and policy behavior captured from live inspection
+
+## What You Can Verify Here
+
+1. Runtime is multi-process, not a single binary agent.
+2. Daemon layers have distinct responsibilities and ports.
+3. Tool execution and PTY handling are protocol-driven.
+4. Computer-use stack is real desktop infrastructure, not mocked browser APIs.
+5. Policy enforcement is explicit and analyzable.
+6. Findings are traceable to files in `extracted/`.
 
 ## Architecture Snapshot
 
@@ -21,7 +46,7 @@ Reverse-engineered architecture reference for Cursor Background Agent runtime.
 - Sandbox environment includes desktop stack (`XFCE + TigerVNC + noVNC + Chrome`).
 - Docker workloads are supported through exposed Docker API (`:2375`).
 - Tooling and protocol surfaces are extracted and indexed under `extracted/`.
-- Curated analysis lives in `docs/`, raw evidence remains in `extracted/`.
+- Curated analysis lives in `docs/`; raw evidence stays in `extracted/`.
 
 ## System Diagram
 
@@ -37,7 +62,7 @@ flowchart LR
     EXEC --> ART[Artifacts and streams back to UI]
 ```
 
-## Component Index
+## Core Components
 
 | Component | Role | Primary Signals |
 | --- | --- | --- |
@@ -80,9 +105,9 @@ flowchart LR
 | Metadata path | IMDS behavior captured in live probe notes |
 | Artifact access | Hash-addressed S3 object behavior captured in evidence files |
 
-## Evidence Sources
+## Evidence You Can Inspect
 
-Primary machine-extracted sources:
+High-signal raw inputs:
 
 - `extracted/exec-daemon-code/`
 - `extracted/binary-analysis/`
