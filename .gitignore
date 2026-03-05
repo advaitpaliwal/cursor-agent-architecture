@@ -1,5 +1,5 @@
 .DS_Store
 
 # Local extraction artifacts not intended for version control
-/extracted/exec-daemon-full/
-/extracted/exec-daemon-tarball.tar.gz
+/exec-daemon-full/
+/exec-daemon-tarball.tar.gz

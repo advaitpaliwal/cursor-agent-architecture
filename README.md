@@ -1,7 +1,7 @@
 # Cursor Background Agent — Full Architecture Reference
 
 Reverse-engineered from inside a live Cursor Background Agent sandbox (March 2026).
-Extracted files are available in [`extracted/`](extracted/).
+Raw evidence files are available in this repository root.
 
 ---
 
@@ -62,9 +62,9 @@ Cursor's Background Agent runs user tasks in isolated cloud sandboxes. Each task
 - `pod-daemon` handles lifecycle/process management and exposes a gRPC control surface.
 - `exec-daemon` orchestrates tool execution (shell, file ops, PTY, streaming protocol).
 - `cursorsandbox` enforces command/file/network policy boundaries.
-- The desktop stack is provisioned via Ansible (`extracted/ansible/vnc-desktop.yml`).
+- The desktop stack is provisioned via Ansible (`ansible/vnc-desktop.yml`).
 - The sandbox includes Docker workload support via exposed Docker API.
-- Findings are traceable to raw evidence files in `extracted/`.
+- Findings are traceable to raw evidence files in this repo.
 
 ---
 
@@ -2189,7 +2189,7 @@ At `~/.cursor/agent-hooks/`:
 - UPDATE_CURSOR_SETTINGS_CONTENT (114 lines)
 - SHELL_COMMAND_CONTENT (18 lines)
 
-### Files Index (extracted/)
+### Files Index
 ```
 exec-daemon-code/
 ├── connect-rpc-services.txt      # 3 gRPC services, 22+ RPCs
