@@ -47,6 +47,10 @@ Reverse-engineered from inside a live Cursor Background Agent sandbox (March 202
   - [Sandbox Policy Deep Dive](#sandbox-policy-deep-dive)
   - [Credential Flow Architecture](#credential-flow-architecture)
   - [Transcript System](#transcript-system)
+  - [Prompt Construction Pipeline](#prompt-construction-pipeline)
+  - [MCP & Plugin Infrastructure](#mcp--plugin-infrastructure)
+  - [Tool Execution Implementation](#tool-execution-implementation)
+  - [ClientSideToolV2Call Protocol](#clientsidetoolv2call-protocol-42-tools)
 - [Raw Command Log](#raw-command-log)
 
 ---
@@ -2312,6 +2316,109 @@ Three token types in the sandbox:
 **Conversation hydration** from blob store: archived messages from `summary_archive.summarized_messages` + current prompt tail from `root_prompt_messages_json`. Long conversations compressed via summary archives.
 
 **Content part types:** text, image, file, reasoning, redacted-reasoning, tool-call, tool-result.
+
+### Prompt Construction Pipeline
+
+> See [`exec-daemon-code/prompt-construction.txt`](exec-daemon-code/prompt-construction.txt)
+
+The exec-daemon does NOT contain the system prompt text. It collects data and sends it to the server:
+
+```
+CLIENT (exec-daemon)           →  RequestContext proto  →  SERVER (aiserver)
+- OS/shell/paths                  - rules[]                - Assembles system prompt
+- Git repos/branches              - tools[] (MCP)          - Injects <rules> XML
+- Cursor rules (.mdc)             - env (OS, paths)        - Injects <user_info>
+- AGENTS.md / CLOUD.md            - cloudRule               - Creates <system_reminder>
+- Skills (SKILL.md)               - agentSkills[]           - Adds tool definitions
+- MCP tool definitions            - customSubagents[]
+```
+
+**`LocalRequestContextExecutor`** assembles the `RequestContext` (31 fields) in parallel: rules, cloud rules, codebase reference, MCP tools/instructions, environment, git repos, skills, conversation notes.
+
+**Rule loading pipeline** — `MergedCursorRulesService` combines 3 sources:
+1. **`LocalCursorRulesService`** — walks UP the directory tree loading `.cursor/rules/**/*.mdc`, `AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md`, `.cursorrules`
+2. **`LocalCloudRulesService`** — loads `.cursor/CLOUD.md` + `AGENTS.md` (combined with `## Cursor Cloud specific instructions` header)
+3. **`AgentSkillsCursorRulesService`** — loads `SKILL.md` files from `.cursor/skills/`, `.agents/skills/`, `.claude/skills/`, `~/.cursor/skills/`
+
+Deduplication: first occurrence wins. Cursor sources processed first, so `.cursor/rules/` takes priority over `.claude/` equivalents.
+
+**Rule types:** `global` (alwaysApply=true), `fileGlobbed` (match globs), `agentFetched` (agent decides on-demand), `manuallyAttached` (user-attached). Rules with `attachToBugBot: true` excluded from main rules.
+
+**XML tags stripped from transcripts** (reveals server prompt structure): `<user_info>`, `<rules>`, `<open_and_recently_viewed_files>`, `<system_reminder>`, `<think>`, `<thinking>`.
+
+### MCP & Plugin Infrastructure
+
+> See [`exec-daemon-code/mcp-and-plugins.txt`](exec-daemon-code/mcp-and-plugins.txt)
+
+**MCP Client** (`McpSdkClient`) wraps `@modelcontextprotocol/sdk`, named "Cursor" v1.0.0. Capabilities: tools, prompts, resources, elicitation. Two transport modes:
+- **Stdio** — local command-based servers (`StdioClientTransport`)
+- **Streamable HTTP** — remote servers with OAuth PKCE flow (`StreamableHTTPClientTransport`)
+
+**Elicitation** — MCP servers can ask questions during tool execution. The client's `ElicitRequestSchema` handler delegates to an elicitation provider, returning `{ action: "accept"|"decline", content }`.
+
+**Caching** (`FileBasedMcpCacheStore`) — tool/resource/prompt definitions cached to `~/.cursor/projects/<slug>/mcp-cache.json`. `CachedMcpClient` returns cached data while real client connects in background.
+
+**MCP Manager** — manages multiple MCP clients, provides unified tool set. Tool naming: `${clientName}-${toolName}`. Max 4 concurrent client tool fetches.
+
+**Server loading** — middleware chain pattern with `ServerBlockingMiddleware` (blocks by team policy/denylist) → config loader → transport-specific connection. Servers can be disabled or require approval.
+
+**Two discovery modes:**
+1. **File system** — `McpFileSystemWriter` writes tool definitions to `~/.cursor/projects/<slug>/mcps/<server>/tools/*.json` with `STATUS.md`, `INSTRUCTIONS.md`
+2. **Meta-tool** — `GetMcpTools`/`CallMcpTool` meta-tools for discovery+execution (alternative approach)
+
+**Plugin system** — `CCPluginIdentifier` validates GitHub `org/repo` format. Plugins published to marketplace, installed per-team or per-user. Plugin manifests contain MCP server configs.
+
+### Tool Execution Implementation
+
+> See [`exec-daemon-code/tool-implementations.txt`](exec-daemon-code/tool-implementations.txt)
+
+Each tool type has a `Local*Executor` class that handles permissions, sandbox policy, and execution:
+
+**`LocalShellExecutor`** — permission-gated shell execution:
+1. `permissionsService.shouldBlockShellCommand()` — checks allowlist/denylist, classifier
+2. If not blocked, applies `.cursorignore` mapping to sandbox policy
+3. Executes via `coreExecutor.execute()` with streaming stdout/stderr/exit events
+4. Respects `skip_approval` flag (YOLO mode) and `timeout` (default 30s)
+
+**Sandbox policy hardcoding** (`@anysphere/shell-exec`):
+- **Always readable:** SSL cert paths, `~/.ssh` (for git)
+- **Always blocked from writing:** `.cursor/*.json`, `.claude/*.json`, `.vscode/**`, `*.code-workspace`, `.cursorignore`, `.git/hooks/**`, `.git/config`
+- **Allowed `.cursor` subdirs:** `rules/`, `commands/`, `worktrees/`, `skills/`, `agents/`
+- **Network denylist:** currently empty (reserved)
+- **Shell env overrides:** `TERM=dumb`, `NO_COLOR=1`, `FORCE_COLOR=0` (suppresses ANSI)
+
+**`LocalGrepExecutor`** — wraps bundled ripgrep (`/exec-daemon/rg`) with sandbox policy, secret redaction on output.
+
+**`LocalReadExecutor`** / **`LocalWriteExecutor`** / **`LocalDeleteExecutor`** — file ops with sandbox policy enforcement and `.cursorignore` checking.
+
+**`LocalFetchExecutor`** — web fetch with network policy through sandbox proxy.
+
+**`LocalRecordScreenExecutor`** — screen recording lifecycle (start/save/discard) using ffmpeg x11grab + InputEventLogger for precise timing.
+
+### ClientSideToolV2Call Protocol (42 Tools)
+
+> See [`exec-daemon-code/client-side-tools-v2-calls.txt`](exec-daemon-code/client-side-tools-v2-calls.txt)
+
+The `aiserver.v1.ClientSideToolV2Call` message defines all tools the LLM can invoke. 42 tools across 8 categories:
+
+| Category | Tools |
+|----------|-------|
+| File ops | read_file, edit_file, list_dir, delete_file, glob_file_search, ripgrep_search (+ v2 variants) |
+| Code intelligence | search_symbols, gotodef, fix_lints, read_lints, apply_agent_diff |
+| Shell | run_terminal_command_v2, write_shell_stdin |
+| Web | web_search, web_fetch, deep_search |
+| MCP | mcp (legacy), call_mcp_tool, list_mcp_resources, read_mcp_resource, get_mcp_tools, mcp_auth |
+| Agent | task, task_v2, await_task, todo_read, todo_write, create_plan, switch_mode, ask_question |
+| Desktop | computer_use, record_screen |
+| Special | reapply, background_composer_followup, knowledge_base, fetch_pull_request, create_diagram, report_bugfix_results |
+
+**Common fields:** `tool` (enum), `tool_call_id`, `timeout_ms`, `name`, `is_streaming`, `is_last_message`, `internal` (hidden from history), `raw_args`, `tool_index`, `model_call_id`.
+
+**Version evolution:** Tools iterate with v2 variants (edit_file→edit_file_v2, task→task_v2). Both versions coexist.
+
+**`internal` flag:** When true, tool call is NOT added to conversation history — used for backend-driven reads that support LLM tools without appearing as agent actions.
+
+**`knowledge_base`** — queries pre-indexed documentation/codebase (vector store). **`deep_search`** — multi-step agent-driven search with subagents.
 
 ### Files Index
 ```
