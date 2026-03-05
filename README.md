@@ -38,7 +38,7 @@ Reverse-engineered from inside a live Cursor Background Agent sandbox (March 202
 - [Sandbox Verification](#sandbox-verification)
 - [Evidence Sources](#evidence-sources)
 - [Protocol and Runtime Findings](#protocol-and-runtime-findings)
-- [Deep Extraction Findings](#deep-extraction-findings)
+- [Advanced Protocol Findings](#advanced-protocol-findings)
   - [StreamUnifiedChatRequest](#streamunifiedchatrequest-63-fields)
   - [Tool Execution Hooks](#tool-execution-hooks-pretooluse--posttooluse)
   - [Client-Side Continuation Loop](#client-side-continuation-loop)
@@ -2180,7 +2180,7 @@ At `~/.cursor/agent-hooks/`:
 - `commit-msg.cursor.co-author`: Auto-appends user as co-author
 - Smart merge handling with AUTO_MERGE/MERGE_MSG fallback
 
-### Proprietary Skill Prompts (6 templates extracted)
+### Proprietary Skill Prompts (6 templates)
 - CREATING_SKILLS_CONTENT (493 lines)
 - CREATING_SUBAGENTS_CONTENT (219 lines)
 - CREATING_CURSOR_RULES_CONTENT (158 lines)
@@ -2190,7 +2190,7 @@ At `~/.cursor/agent-hooks/`:
 
 ---
 
-## Deep Extraction Findings
+## Advanced Protocol Findings
 
 These findings come from reverse-engineering the exec-daemon webpack bundle internals. Full details in the linked files.
 
@@ -2592,7 +2592,7 @@ curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cu
 # PartialToolCallUpdate, ToolCallDelta, ToolCallDeltaUpdate
 
 ## Billing & Usage Protobuf (DashboardService)
-# Complete billing system extracted from exec-daemon webpack bundle:
+# Complete billing system from exec-daemon webpack bundle:
 
 ### Spending & Limits:
 # GetCurrentPeriodUsage{Request,Response} — current spend tracking
@@ -2770,14 +2770,14 @@ curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cu
 # Chromium path cached at: /usr/local/bin/chromium-path.txt
 # Points to: /root/.cache/ms-playwright/chromium-1194/chrome-linux/chrome
 
-## Computer-Use supervisord.conf (extracted from ECR layer):
+## Computer-Use supervisord.conf (from ECR layer):
 # [supervisord] nodaemon=true
 # [program:xvfb]      priority=100, Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX
 # [program:x11vnc]     priority=200, start-x11vnc.sh (waits for X socket + xdpyinfo)
 # [program:websockify]  priority=300, websockify 6080 localhost:5900
 # [program:chrome]     priority=400, start-chrome.sh (reads chromium-path.txt, starts maximized)
 
-## Computer-Use start-chrome.sh (extracted from ECR layer):
+## Computer-Use start-chrome.sh (from ECR layer):
 # Waits for X server via /tmp/.X11-unix/X99 socket
 # Reads cached chromium path from /usr/local/bin/chromium-path.txt
 # Falls back to find search if cache miss
