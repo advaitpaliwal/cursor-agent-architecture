@@ -1,5 +1,14 @@
 # Cursor Agent Architecture
 
+## Index
+
+- [System Overview](#system-overview)
+- [Core Components](#core-components)
+- [Runtime Ports](#runtime-ports)
+- [Execution Flow](#execution-flow)
+- [Repository Structure](#repository-structure)
+- [Generate Snapshot](#generate-snapshot)
+
 ## System Overview
 
 Cursor Background Agent runs each task in an isolated cloud sandbox.
