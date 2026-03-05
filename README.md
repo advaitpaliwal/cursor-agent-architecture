@@ -29,15 +29,15 @@ Reverse-engineered from inside a live Cursor Background Agent sandbox (March 202
   - [Docker Compose](#step-8-docker-compose-host)
   - [AWS Infrastructure](#step-9-aws-infrastructure)
 - [Key Design Decisions](#key-design-decisions)
-- [The Biggest Finding: It's Claude Code Under the Hood](#the-biggest-finding-its-claude-code-under-the-hood)
+- [Claude Code Integration Evidence](#claude-code-integration-evidence)
 - [Bundled Dependencies](#bundled-dependencies)
 - [Google Chrome](#google-chrome)
 - [Sandbox Policy System](#sandbox-policy-system)
 - [Multi-Region Infrastructure](#multi-region-infrastructure-cursorvm-managercom)
-- [Security Analysis](#security-analysis-live-sandbox-march-4-2026)
-- [Live Sandbox Verification](#live-sandbox-verification-march-4-2026)
+- [Security Analysis](#security-analysis)
+- [Sandbox Verification](#sandbox-verification)
 - [Evidence Sources](#evidence-sources)
-- [Additional Live Findings](#additional-live-findings)
+- [Protocol and Runtime Findings](#protocol-and-runtime-findings)
 - [Raw Command Log](#raw-command-log)
 
 ---
@@ -618,7 +618,7 @@ fi
 
 ### Step 6: Pod Daemon (Simplified Rust)
 
-> **Correction (March 4, 2026):** Pod-daemon is written in **Rust**, not Go. Binary analysis reveals tonic gRPC, rustls TLS, aws-lc crypto, and Rust-specific debug symbols.
+Pod-daemon is written in **Rust**. Binary analysis reveals tonic gRPC, rustls TLS, aws-lc crypto, and Rust-specific debug symbols.
 
 ```rust
 // Simplified conceptual equivalent — real binary is ~7.8MB stripped Rust
@@ -777,7 +777,7 @@ flowchart TD
 
 ---
 
-## The Biggest Finding: It's Claude Code Under the Hood
+## Claude Code Integration Evidence
 
 The webpack bundle (`/exec-daemon/index.js`, 15.2MB) reveals that **Cursor's Background Agent is running a modified/embedded version of Claude Code** (Anthropic's CLI agent). The exec-daemon contains a translation layer that maps Claude Code's internal tool system and event hooks into Cursor's own format.
 
@@ -1211,7 +1211,7 @@ The exec-daemon webpack bundle imports from these internal Anysphere packages:
 
 ---
 
-## Security Analysis (Live Sandbox — March 4, 2026)
+## Security Analysis
 
 ### Credential Exposure
 
@@ -1333,11 +1333,11 @@ This confirms polished-renderer lives in the `everysphere` monorepo under `packa
 
 ---
 
-## Live Sandbox Verification (March 4, 2026)
+## Sandbox Verification
 
-### Exec Daemon File Layout (Updated)
+### Exec Daemon File Layout
 
-The original README documented the exec-daemon directory. Here's the **complete, verified** layout with sizes:
+Complete exec-daemon directory layout with sizes:
 
 ```
 /exec-daemon/
@@ -1359,13 +1359,13 @@ The original README documented the exec-daemon directory. Here's the **complete,
 └── 97f64a4d8eca9a2e35bb.mp4  # 63,178 bytes   — Splash/loading animation
 ```
 
-**New findings:**
+**Notable findings:**
 - **`polished-renderer.node`** — The polished-renderer is NOT a standalone binary at `/opt/cursor/polished-renderer/` as previously assumed. It's a **Node N-API shared object** bundled directly in `/exec-daemon/`. This means the exec-daemon can render screen recordings in-process without spawning a separate binary. Uses FFmpeg (av_frame_alloc, avcodec_receive_frame, av_read_frame).
 - **`rg`** — Bundled ripgrep binary, used by exec-daemon for code search (referenced via `--rg-path /exec-daemon/rg` CLI flag).
 - **`gh`** — Bundled GitHub CLI (55MB static binary), used for PR/issue management.
 - **Code-split chunks 252/407/511/953** — All contain OpenTelemetry platform-specific machine-id detection for Windows/BSD/macOS/unsupported. Only the Linux path is used.
 
-### Exec Daemon CLI Flags (Live Process)
+### Exec Daemon CLI Flags
 
 Captured from the running exec-daemon process:
 
@@ -1876,7 +1876,7 @@ enum CursorRuleSource {
 
 Team rules take priority over user rules, allowing organizations to enforce coding standards.
 
-### Live Process Tree (Verified)
+### Process Tree
 
 Top processes by memory from inside the sandbox:
 
@@ -1896,7 +1896,7 @@ Top processes by memory from inside the sandbox:
 
 ---
 
-## Container Runtime Details (Live Inspection)
+## Container Runtime Details
 
 ### Resource Limits (from cgroups v1)
 
@@ -2126,9 +2126,9 @@ crane manifest public.ecr.aws/k0i0n2g5/cursorenvironments/universal:default-b8e9
 
 ```
 
-## Additional Live Findings
+## Protocol and Runtime Findings
 
-### Connect-RPC API Surface (LIVE TESTED)
+### Connect-RPC API Surface
 Three services discovered on exec-daemon, all confirmed working:
 
 **Port 26053 (HTTP):**
@@ -2143,7 +2143,7 @@ Auth: Bearer token from `--auth-token` CLI flag. Protocol: Connect-RPC v1.6.1 (b
 ### Exec Protocol (21 Tool Types)
 The ExecService uses envelope-framed JSON streaming. The orchestrator sends `ExecServerMessage` and streams back `ExecClientMessage` + `ExecClientControlMessage`. Tool types include: shell, read, write, delete, grep, ls, diagnostics, request_context, mcp, shell_stream, background_shell, fetch, record_screen, computer_use, write_shell_stdin, execute_hook, subagent, force_background_shell.
 
-### Live RequestContext Capture
+### RequestContext Capture
 Successfully called `request_context_args` via the ExecService to capture the full 265KB `RequestContext` — the exact data package exec-daemon sends to aiserver for prompt construction. Contains: 20 cursor rules, 20 agent skills, git repo info, environment details, sandbox config.
 
 ### Network Topology
@@ -2219,7 +2219,7 @@ all-protobuf-enums.txt            # 100+ enums from agent.v1/aiserver.v1
 
 ## Raw Command Log
 
-Raw command/evidence notes captured during live inspection on March 4, 2026.
+Raw command/evidence notes captured on March 4, 2026.
 
 ````bash
 ls -la /exec-daemon/                    # → full file layout with sizes (rg, gh, polished-renderer.node)
@@ -2568,7 +2568,7 @@ curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cu
 # cursor.blob.core.windows.net — VS Code server releases
 # Pattern: https://cursor.blob.core.windows.net/remote-releases/${commit}/vscode-reh-${os}-${arch}.tar.gz
 
-### Credential Note (CORRECTION):
+### Credential Note:
 # Credentials in ~/.claude/.credentials.json and ~/.config/gh/hosts.yml
 # are the USER'S OWN credentials injected by Cursor via the credential
 # helper system when Claude Code starts. The sk-ant-oat01-* OAuth tokens
@@ -2759,7 +2759,7 @@ curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cu
 # - polished-renderer lives in ansible/files/ for both public and internal builds
 # - polished-renderer Cargo.toml uses workspace references, auto-converted for standalone build
 
-## Privilege Model (Live)
+## Privilege Model
 # User `ubuntu` has no effective Linux capabilities (`CapEff=0`) but has passwordless sudo:
 #   /etc/sudoers.d/ubuntu -> `ubuntu ALL=(ALL) NOPASSWD:ALL`
 # Root (`/proc/1/status`) has full caps (`CapEff/CapPrm/CapBnd = 000001ffffffffff`) with `Seccomp=0`.
@@ -2773,7 +2773,7 @@ curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cu
 # - `sudo` is allowed (including root-level file and mount operations)
 # This indicates classifier/policy gating above Linux DAC/MAC.
 
-## Network + Service Topology (Live)
+## Network + Service Topology
 # Interfaces/routes:
 #   eth0 = 172.30.0.2/24, default gateway 172.30.0.1
 #   docker0 = 172.17.0.1/16
@@ -2799,7 +2799,7 @@ curl -s -H "Authorization: Bearer $TOKEN" "https://public.ecr.aws/v2/k0i0n2g5/cu
 #   - 172.30.0.2:2375  (Docker API)
 # This confirms host-side orchestration traffic entering the sandbox namespace.
 
-## Docker Bootstrap Reality Check (Correction)
+## Docker Bootstrap Behavior
 # `desktop-init.sh` logs:
 #   - `docker: command not found`
 #   - `Docker failed to become accessible after 60 seconds`
