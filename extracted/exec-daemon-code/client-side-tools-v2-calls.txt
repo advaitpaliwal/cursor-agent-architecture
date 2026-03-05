@@ -1,0 +1,121 @@
+# ClientSideToolV2Call - Complete Tool Call Protocol
+# All 42 tools available to the Cursor agent (server-side tool call definitions)
+# From: aiserver.v1.ClientSideToolV2Call
+# These are the tools the LLM can invoke; exec-daemon executes them locally
+
+## Tool Types (field_no -> name -> type)
+
+### File Operations
+  2.  read_semsearch_files_params    -> ReadSemsearchFilesParams      # Semantic search on files
+  5.  ripgrep_search_params          -> RipgrepSearchParams           # Ripgrep code search
+  8.  read_file_params               -> ReadFileParams                # Read file contents
+  12. list_dir_params                -> ListDirParams                 # List directory
+  13. edit_file_params               -> EditFileParams                # Edit file (v1)
+  16. file_search_params             -> ToolCallFileSearchParams      # File name search
+  17. semantic_search_full_params    -> SemanticSearchFullParams      # Full semantic search
+  19. delete_file_params             -> DeleteFileParams              # Delete file
+  50. edit_file_v2_params            -> EditFileV2Params              # Edit file (v2)
+  52. list_dir_v2_params             -> ListDirV2Params               # List directory (v2)
+  53. read_file_v2_params            -> ReadFileV2Params              # Read file (v2)
+  54. ripgrep_raw_search_params      -> RipgrepRawSearchParams        # Raw ripgrep search
+  55. glob_file_search_params        -> GlobFileSearchParams          # Glob pattern search
+
+### Code Intelligence
+  31. search_symbols_params          -> SearchSymbolsParams           # Symbol search
+  41. gotodef_params                 -> GotodefParams                 # Go to definition
+  37. fix_lints_params               -> FixLintsParams                # Auto-fix lint errors
+  38. read_lints_params              -> ReadLintsParams               # Read lint diagnostics
+  63. apply_agent_diff_params        -> ApplyAgentDiffParams          # Apply agent-generated diff
+
+### Shell & Terminal
+  23. run_terminal_command_v2_params -> RunTerminalCommandV2Params    # Run terminal command
+  67. write_shell_stdin_params       -> WriteShellStdinArgs           # Write to shell stdin
+
+### Web & Search
+  26. web_search_params              -> WebSearchParams               # Web search
+  69. web_fetch_params               -> WebFetchParams                # Fetch URL content
+  35. deep_search_params             -> DeepSearchParams              # Deep search (multi-step)
+
+### MCP (Model Context Protocol)
+  27. mcp_params                     -> MCPParams                     # Call MCP tool (legacy)
+  57. list_mcp_resources_params      -> ListMcpResourcesParams        # List MCP resources
+  58. read_mcp_resource_params       -> ReadMcpResourceParams         # Read MCP resource
+  62. call_mcp_tool_params           -> CallMcpToolParams             # Call MCP tool (v2)
+  72. get_mcp_tools_params           -> GetMcpToolsParams             # List available MCP tools
+  71. mcp_auth_params                -> McpAuthParams                 # MCP OAuth authentication
+
+### Agent & Planning
+  42. task_params                    -> TaskParams                    # Spawn subagent task
+  43. await_task_params              -> AwaitTaskParams               # Wait for task completion
+  61. task_v2_params                 -> TaskV2Params                  # Spawn subagent (v2)
+  44. todo_read_params               -> TodoReadParams                # Read todo list
+  45. todo_write_params              -> TodoWriteParams               # Write todo list
+  56. create_plan_params             -> CreatePlanParams              # Create execution plan
+  65. switch_mode_params             -> SwitchModeParams              # Switch agent mode
+  64. ask_question_params            -> AskQuestionParams             # Ask user question
+
+### Computer Use & Screen
+  66. computer_use_params            -> ComputerUseParams             # Mouse/keyboard/screenshot
+  68. record_screen_params           -> RecordScreenArgs              # Record screen
+
+### Context & Rules
+  24. fetch_rules_params             -> FetchRulesParams              # Fetch cursor rules
+  59. read_project_params            -> ReadProjectParams             # Read project info
+  60. update_project_params          -> UpdateProjectParams           # Update project
+
+### Special
+  20. reapply_params                 -> ReapplyParams                 # Reapply previous edit
+  32. background_composer_followup   -> BackgroundComposerFollowupParams  # Background follow-up
+  33. knowledge_base_params          -> KnowledgeBaseParams           # Query knowledge base
+  34. fetch_pull_request_params      -> FetchPullRequestParams        # Fetch PR data
+  36. create_diagram_params          -> CreateDiagramParams           # Create diagram
+  70. report_bugfix_results_params   -> ReportBugfixResultsParams     # Report bugfix results
+
+## Common Fields on ClientSideToolV2Call
+  tool (1): ClientSideToolV2 enum              # Tool type identifier
+  tool_call_id (3): string                     # Unique call ID
+  timeout_ms (6): optional double              # Timeout in milliseconds
+  name (9): string                             # Tool name
+  is_streaming (14): bool                      # Whether tool streams results
+  is_last_message (15): bool                   # Last tool call in batch
+  internal (51): bool                          # Internal-only (hidden from user/history)
+  raw_args (10): string                        # Raw JSON arguments
+  tool_index (48): optional uint32             # Index in parallel tool calls
+  model_call_id (49): optional string          # Links to model's inference decision
+
+## Key Insights
+
+### 1. Version Evolution
+  Tools evolve with v2 versions: edit_file -> edit_file_v2,
+  read_file -> read_file_v2, list_dir -> list_dir_v2, task -> task_v2.
+  Both versions coexist for backward compatibility.
+
+### 2. Internal Flag
+  When internal=true, the tool call is NOT added to conversation history.
+  Used when the backend needs to read a file to support LLM-driven tools
+  without showing it as an agent action.
+
+### 3. Streaming Tools
+  is_streaming indicates the tool produces streaming output (e.g., shell commands,
+  deep search). The client renders progressive updates.
+
+### 4. Model Call ID
+  model_call_id links the tool call back to the specific model inference
+  that requested it. Used for attribution and debugging.
+
+### 5. Tool Count Growth
+  Field numbers go up to 72, with gaps indicating removed/deprecated tools.
+  The tool surface has grown significantly from ~20 to 42+ tools.
+
+### 6. Computer Use Integration
+  Computer use (mouse, keyboard, screenshots) is a first-class tool alongside
+  traditional code tools. Combined with screen recording for debugging.
+
+### 7. Knowledge Base & Deep Search
+  Knowledge base and deep search are separate capabilities:
+  - KnowledgeBase: Query pre-indexed documentation/codebase
+  - DeepSearch: Multi-step, agent-driven deep search with subagents
+
+### 8. BugBot Integration
+  report_bugfix_results_params connects to the BugBot system for
+  reporting automated bug fix results back to the PR review system.
